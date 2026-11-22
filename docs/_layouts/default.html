@@ -5,20 +5,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   {% seo %}
   <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
-  <meta name="theme-color" content="#1e1b4b">
+  <meta name="theme-color" content="#09090b">
   <link rel="icon" href="{{ '/assets/logo.svg' | relative_url }}" type="image/svg+xml">
   <link rel="apple-touch-icon" href="{{ '/assets/apple-touch-icon.png' | relative_url }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chivo+Mono:ital,wght@0,400;0,500;1,400&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="{{ '/assets/site.css' | relative_url }}">
 </head>
-<body>
+<body class="doc-page">
   <header class="topbar">
     <div class="wrap">
-      <a class="brand" href="{{ '/' | relative_url }}"><img src="{{ '/assets/logo.svg' | relative_url }}" alt="" width="32" height="32">autologin-mcp</a>
+      <a class="brand" href="{{ '/' | relative_url }}"><img src="{{ '/assets/logo.svg' | relative_url }}" alt="" width="30" height="30">autologin-mcp</a>
       <nav class="topnav" aria-label="Main">
         <a href="{{ '/docs/' | relative_url }}">Docs</a>
         <a href="{{ '/getting-started.html' | relative_url }}" class="hide-sm">Getting started</a>
         <a href="{{ '/faq.html' | relative_url }}" class="hide-sm">FAQ</a>
-        <a href="https://github.com/olgaysezgin/autologin-mcp">GitHub</a>
+        <a class="btn small" href="https://github.com/olgaysezgin/autologin-mcp">GitHub</a>
       </nav>
     </div>
   </header>
@@ -39,8 +42,12 @@
   </div>
   <footer class="site">
     <div class="wrap">
-      <span>autologin-mcp · MIT License · © 2026 Olgay Sezgin</span>
+      <div>
+        <a class="brand" href="{{ '/' | relative_url }}"><img src="{{ '/assets/logo.svg' | relative_url }}" alt="" width="30" height="30">autologin-mcp</a>
+        <p class="by">MIT License · © 2026 <a href="https://github.com/olgaysezgin">Olgay Sezgin</a></p>
+      </div>
       <nav aria-label="Footer">
+        <a href="{{ '/docs/' | relative_url }}">Documentation</a>
         <a href="https://github.com/olgaysezgin/autologin-mcp">GitHub</a>
         <a href="https://www.npmjs.com/package/autologin-mcp">npm</a>
         <a href="{{ '/llms.txt' | relative_url }}">llms.txt</a>

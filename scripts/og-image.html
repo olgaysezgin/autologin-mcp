@@ -3,30 +3,34 @@
 <head>
 <meta charset="utf-8">
 <title>autologin-mcp social card</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chivo+Mono&family=Plus+Jakarta+Sans:wght@700;800&display=swap">
 <style>
   html, body { margin: 0; }
   body {
-    width: 1200px; height: 630px; box-sizing: border-box; padding: 72px 80px;
-    display: flex; align-items: center; gap: 64px;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
-    color: #F8FAFC;
-    background: radial-gradient(circle at 85% 15%, #155E75 0%, transparent 45%), linear-gradient(135deg, #0B1022 0%, #1E1B4B 100%);
+    position: relative; overflow: hidden;
+    width: 1200px; height: 630px; box-sizing: border-box; padding: 70px 80px;
+    display: flex; flex-direction: column; justify-content: center;
+    font-family: "Plus Jakarta Sans", system-ui, sans-serif; color: #e7e7e7;
+    background: radial-gradient(55% 60% at 80% 0%, rgba(252, 211, 77, .16), transparent 70%), #09090b;
   }
-  img { width: 300px; height: 300px; flex: none; border-radius: 66px; box-shadow: 0 30px 80px rgba(0, 0, 0, .45); }
-  h1 { margin: 0 0 18px; font-size: 76px; letter-spacing: -2px; line-height: 1; }
-  .tag { margin: 0 0 26px; font-size: 34px; font-weight: 600; color: #C7D2FE; line-height: 1.2; }
-  .sub { margin: 0 0 34px; font-size: 27px; color: #CBD5E1; line-height: 1.4; }
-  .chips { display: flex; flex-wrap: wrap; gap: 12px; }
-  .chips span { font-size: 21px; padding: 8px 16px; border-radius: 999px; background: rgba(255, 255, 255, .09); border: 1px solid rgba(255, 255, 255, .18); }
+  body::before {
+    content: ""; position: absolute; inset: 0; z-index: -1;
+    background-image: radial-gradient(rgba(255, 255, 255, .2) 1px, transparent 1.4px); background-size: 13px 13px;
+    -webkit-mask-image: radial-gradient(40% 70% at 70% 45%, #000 10%, transparent 100%);
+  }
+  .brand { display: flex; align-items: center; gap: 18px; font-size: 38px; font-weight: 800; letter-spacing: -1px; margin-bottom: 44px; }
+  .brand img { width: 68px; height: 68px; border-radius: 15px; }
+  h1 { margin: 0 0 30px; font-size: 76px; font-weight: 800; line-height: 1.08; letter-spacing: -2.4px; }
+  h1 span { color: #fcd34d; }
+  .sub { margin: 0 0 40px; font: 400 25px/1.5 "Chivo Mono", ui-monospace, monospace; color: #c9c9cf; }
+  .install { display: inline-flex; gap: 16px; padding: 16px 26px; border-radius: 14px; border: 1px solid rgba(252, 211, 77, .5); background: #141417; font: 400 26px/1 ui-monospace, Menlo, monospace; color: #fff; align-self: flex-start; }
+  .install b { color: #fcd34d; font-weight: 400; }
 </style>
 </head>
 <body>
-  <img src="../docs/assets/logo.svg" alt="">
-  <div>
-    <h1>autologin-mcp</h1>
-    <p class="tag">Auto-login MCP server for AI coding agents</p>
-    <p class="sub">Your agent logs in to the app it is testing.<br>Your password never reaches the model.</p>
-    <div class="chips"><span>Claude Code</span><span>Claude in Chrome</span><span>Playwright MCP</span><span>chrome-devtools-mcp</span></div>
-  </div>
+  <div class="brand"><img src="../docs/assets/logo.svg" alt="">autologin-mcp</div>
+  <h1>Auto-login MCP server<br>for <span>AI coding agents</span></h1>
+  <p class="sub">Your agent logs in. The password never reaches the model.</p>
+  <div class="install"><b>$</b>npx autologin-mcp install</div>
 </body>
 </html>

@@ -31,8 +31,9 @@ try {
     console.log(`wrote docs/assets/${file}`);
   }
   await page.setViewport({ width: 1200, height: 630, deviceScaleFactor: 1 });
-  await page.goto(pathToFileURL(path.join(root, 'scripts', 'og-image.html')).href);
+  await page.goto(pathToFileURL(path.join(root, 'scripts', 'og-image.html')).href, { waitUntil: 'networkidle0' });
   await page.waitForFunction(() => document.images[0]?.complete);
+  await page.evaluate(() => document.fonts.ready);
   await page.screenshot({ path: path.join(assets, 'og-image.png') });
   console.log('wrote docs/assets/og-image.png');
 } finally {
