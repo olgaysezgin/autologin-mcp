@@ -1,0 +1,75 @@
+{
+  "name": "autologin-mcp",
+  "version": "0.1.0",
+  "description": "Auto-login MCP server for AI coding agents (Claude Code, Claude in Chrome, Playwright MCP, chrome-devtools-mcp). Logs your agent into the app under test; credentials stay on your machine and never reach the model.",
+  "type": "module",
+  "bin": {
+    "autologin-mcp": "dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run typecheck && npm run coverage && npm run build && npm run smoke",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude-code",
+    "autologin",
+    "login",
+    "e2e-testing",
+    "qa",
+    "ai-agents",
+    "browser-automation",
+    "chrome-devtools-protocol",
+    "credentials",
+    "mcp-server",
+    "claude",
+    "claude-in-chrome",
+    "playwright-mcp",
+    "chrome-devtools-mcp",
+    "ai-testing",
+    "session-expired",
+    "test-automation",
+    "llm-security",
+    "secrets"
+  ],
+  "author": "Olgay Sezgin",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/olgaysezgin/autologin-mcp.git"
+  },
+  "homepage": "https://olgaysezgin.github.io/autologin-mcp/",
+  "bugs": {
+    "url": "https://github.com/olgaysezgin/autologin-mcp/issues"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "dotenv": "^18.0.10",
+    "puppeteer-core": "^25.18.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@vitest/coverage-v8": "^5.1.1",
+    "jsdom": "^31.0.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.1"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

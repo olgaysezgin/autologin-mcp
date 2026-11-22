@@ -1,0 +1,189 @@
+import { describe, expect, it, vi } from 'vitest';
+import type { DetectResult, InpageAction, StateResult } from '../src/inpage.ts';
+import { DEFAULT_TIMING, performLogin, realClock, type Clock, type ElementLike, type PageLike } from '../src/login/engine.ts';
+import { buildStore, type UsableProfile } from '../src/store/profiles.ts';
+
+const profile = buildStore({ APP_URL: 'app.test', APP_USERNAME: 'qa', APP_PASSWORD: 'pw', APP_SUCCESS_SELECTOR: '#menu' })
+  .profiles[0] as UsableProfile;
+
+const FOUND: DetectResult = { found: true, hasUsername: true, hasSubmit: true };
+const onForm = (errorText: string | null = null): StateResult => ({ ready: true, passwordVisible: true, success: false, errorText });
+const gone: StateResult = { ready: true, passwordVisible: false, success: false, errorText: null };
+const loggedIn: StateResult = { ready: true, passwordVisible: true, success: true, errorText: null };
+const loading: StateResult = { ready: false, passwordVisible: false, success: false, errorText: null };
+
+type Step<T> = T | Error;
+
+/** A scripted page: each action returns the next value of its queue (the last one repeats). */
+class FakePage implements PageLike {
+  readonly calls: string[] = [];
+  readonly typed: string[] = [];
+  clickError: Error | null = null;
+  elements = new Set(['username', 'password', 'submit']);
+  bringToFrontError: unknown = null;
+  submitResult: 'clicked' | 'submitted' | 'none' = 'clicked';
+  insertError: unknown = null;
+
+  constructor(
+    private readonly detects: Array<Step<DetectResult>>,
+    private readonly states: Array<Step<StateResult>>,
+  ) {}
+
+  url(): string {
+    return 'https://app.test/login';
+  }
+
+  private next<T>(queue: Array<Step<T>>): T {
+    const value = queue.length > 1 ? queue.shift()! : queue[0]!;
+    if (value instanceof Error) throw value;
+    return value;
+  }
+
+  async run<T>(action: InpageAction): Promise<T> {
+    this.calls.push(action);
+    if (action === 'detect') return this.next(this.detects) as T;
+    if (action === 'state') return this.next(this.states) as T;
+    if (action === 'submit') return this.submitResult as T;
+    return true as T;
+  }
+
+  async element(selector: string): Promise<ElementLike | null> {
+    const role = /"(\w+)"/.exec(selector)![1]!;
+    if (!this.elements.has(role)) return null;
+    return {
+      focus: async () => {
+        this.calls.push(`focus:${role}`);
+      },
+      click: async () => {
+        if (this.clickError) throw this.clickError;
+        this.calls.push(`click:${role}`);
+      },
+    };
+  }
+
+  async insertText(text: string): Promise<void> {
+    if (this.insertError !== null) throw this.insertError;
+    this.typed.push(text);
+  }
+
+  async press(key: string): Promise<void> {
+    this.calls.push(`press:${key}`);
+  }
+
+  async bringToFront(): Promise<void> {
+    if (this.bringToFrontError !== null) throw this.bringToFrontError;
+  }
+}
+
+function fakeClock(): Clock & { t: number } {
+  const clock = { t: 0, now: () => clock.t, sleep: async (ms: number) => void (clock.t += ms) };
+  return clock;
+}
+
+const timing = { detectTimeoutMs: 1_000, verifyTimeoutMs: 3_000, pollMs: 250, earlyFailAfterMs: 1_000 };
+
+describe('performLogin', () => {
+  it('retries detection until the form appears, types both fields and succeeds on the success selector', async () => {
+    const page = new FakePage([new Error('navigating'), { found: false, hasUsername: false, hasSubmit: false }, FOUND], [onForm(), loggedIn]);
+    const result = await performLogin(page, profile, timing, fakeClock());
+    expect(result).toEqual({ status: 'success', profile: 'app', url: 'https://app.test/login' });
+    expect(page.typed).toEqual(['qa', 'pw']);
+    expect(page.calls).toContain('click:submit');
+    expect(page.calls).not.toContain('submit');
+  });
+
+  it('returns no_login_form immediately when a selector does not match', async () => {
+    const clock = fakeClock();
+    const page = new FakePage([{ found: false, hasUsername: false, hasSubmit: false, error: 'The password selector did not match a visible field.' }], [onForm()]);
+    expect(await performLogin(page, profile, timing, clock)).toMatchObject({ status: 'no_login_form', hint: expect.stringContaining('password selector') });
+    expect(clock.t).toBe(0);
+  });
+
+  it('returns no_login_form after the detect timeout', async () => {
+    const page = new FakePage([{ found: false, hasUsername: false, hasSubmit: false }], [onForm()]);
+    const clock = fakeClock();
+    expect(await performLogin(page, profile, timing, clock)).toMatchObject({ status: 'no_login_form', hint: 'No visible password field was found on the page.' });
+    expect(clock.t).toBe(1_000);
+  });
+
+  it('succeeds once the password field stays gone, ignoring loading states and flickers', async () => {
+    const page = new FakePage([FOUND], [onForm(), loading, gone, onForm(), gone, gone]);
+    expect(await performLogin(page, profile, timing, fakeClock())).toMatchObject({ status: 'success' });
+  });
+
+  it('fails early on a new error message, then clears the password field', async () => {
+    const clock = fakeClock();
+    const page = new FakePage([FOUND], [onForm(), onForm('Wrong password')]);
+    expect(await performLogin(page, profile, timing, clock)).toEqual({
+      status: 'failed',
+      profile: 'app',
+      url: 'https://app.test/login',
+      reason: 'still_on_login_form',
+      hint: 'Wrong password',
+    });
+    expect(clock.t).toBe(1_000);
+    expect(page.calls.at(-1)).toBe('clear');
+  });
+
+  it('waits for the full timeout when the error was already shown before submitting', async () => {
+    const clock = fakeClock();
+    const page = new FakePage([FOUND], [onForm('Session expired')]);
+    expect(await performLogin(page, profile, timing, clock)).toMatchObject({ status: 'failed', hint: 'Session expired' });
+    expect(clock.t).toBe(3_000);
+  });
+
+  it('uses a generic hint when the page state cannot be read', async () => {
+    const page = new FakePage([FOUND], [new Error('context destroyed')]);
+    expect(await performLogin(page, profile, timing, fakeClock())).toMatchObject({ status: 'failed', hint: expect.stringContaining('Still on the login form') });
+  });
+
+  it('types only the password when there is no username field and presses Enter when nothing can be submitted', async () => {
+    const page = new FakePage([{ found: true, hasUsername: false, hasSubmit: false }], [onForm(), gone, gone]);
+    page.submitResult = 'none';
+    page.bringToFrontError = new Error('no window');
+    expect((await performLogin(page, profile, timing, fakeClock())).status).toBe('success');
+    expect(page.typed).toEqual(['pw']);
+    expect(page.calls).toContain('press:Enter');
+  });
+
+  it('submits the form in-page when there is no button', async () => {
+    const page = new FakePage([{ found: true, hasUsername: true, hasSubmit: false }], [onForm(), gone, gone]);
+    page.submitResult = 'submitted';
+    await performLogin(page, profile, timing, fakeClock());
+    expect(page.calls).toContain('submit');
+    expect(page.calls).not.toContain('press:Enter');
+  });
+
+  it('falls back to an in-page submit when clicking fails or the button vanished', async () => {
+    const page = new FakePage([FOUND], [onForm(), gone, gone]);
+    page.clickError = new Error('not clickable');
+    await performLogin(page, profile, timing, fakeClock());
+    expect(page.calls).toContain('submit');
+
+    const vanished = new FakePage([FOUND], [onForm(), gone, gone]);
+    vanished.elements.delete('submit');
+    await performLogin(vanished, profile, timing, fakeClock());
+    expect(vanished.calls).toContain('submit');
+  });
+
+  it('returns error (without the password) when a field disappears or typing fails', async () => {
+    const page = new FakePage([FOUND], [onForm()]);
+    page.elements.delete('username');
+    expect(await performLogin(page, profile, timing, fakeClock())).toMatchObject({ status: 'error', hint: 'The username field disappeared before it could be filled.' });
+    expect(page.calls.at(-1)).toBe('clear');
+
+    const broken = new FakePage([FOUND], [onForm()]);
+    broken.insertError = 'raw failure';
+    expect(await performLogin(broken, profile, timing, fakeClock())).toMatchObject({ status: 'error', hint: 'raw failure' });
+  });
+
+  it('has sane defaults and a real clock', async () => {
+    expect(DEFAULT_TIMING.verifyTimeoutMs).toBeGreaterThan(DEFAULT_TIMING.earlyFailAfterMs);
+    const sleep = vi.spyOn(globalThis, 'setTimeout');
+    const before = realClock.now();
+    await realClock.sleep(1);
+    expect(realClock.now()).toBeGreaterThanOrEqual(before);
+    expect(sleep).toHaveBeenCalled();
+    sleep.mockRestore();
+  });
+});

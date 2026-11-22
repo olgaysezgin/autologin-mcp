@@ -1,0 +1,15 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Late form</title></head>
+<body>
+  <div id="root">Loading...</div>
+  <script>
+    setTimeout(() => {
+      document.getElementById('root').innerHTML =
+        '<form method="post" action="/login">' +
+        '<input type="email" name="email"><input type="password" name="password">' +
+        '<input type="submit" value="Login"></form>';
+    }, 700);
+  </script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Enter to submit</title></head>
+<body>
+  <input id="login" type="text" name="login">
+  <input id="password" type="password">
+  <script>
+    document.getElementById('password').addEventListener('keydown', async (e) => {
+      if (e.key !== 'Enter') return;
+      const body = JSON.stringify({ username: document.getElementById('login').value, password: e.target.value });
+      const res = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+      if (res.ok) location.href = '/dashboard.html';
+    });
+  </script>
+</body>
+</html>

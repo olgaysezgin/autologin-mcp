@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Controlled inputs (React-like)</title></head>
+<body>
+  <div id="app">
+    <div id="login">
+      <input id="user" type="text" placeholder="Username">
+      <input id="pass" type="password" placeholder="Password">
+      <div role="button" id="go" tabindex="0">Log in</div>
+      <p id="err" class="error" style="display:none"></p>
+    </div>
+    <div id="home" style="display:none">Welcome</div>
+  </div>
+  <script>
+    // Like React: the component state only changes through input events.
+    const state = { username: '', password: '' };
+    document.getElementById('user').addEventListener('input', (e) => { state.username = e.target.value; });
+    document.getElementById('pass').addEventListener('input', (e) => { state.password = e.target.value; });
+    document.getElementById('go').addEventListener('click', async () => {
+      const res = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(state) });
+      if (res.ok) {
+        document.getElementById('login').remove();
+        document.getElementById('home').style.display = 'block';
+      } else {
+        const err = document.getElementById('err');
+        err.textContent = 'Invalid credentials';
+        err.style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>

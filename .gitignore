@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+*.log
+.DS_Store
+# never commit credentials
+.env
+.env.*
+credentials.env
+# npm pack output
+*.tgz

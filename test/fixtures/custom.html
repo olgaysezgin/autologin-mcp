@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Custom layout</title></head>
+<body>
+  <div class="box">
+    <input id="secret" type="password" placeholder="Secret">
+    <input id="login-name" type="text" placeholder="Who are you?">
+    <a id="go" href="#">&rarr;</a>
+    <div id="welcome" style="display:none">Signed in</div>
+  </div>
+  <script>
+    document.getElementById('go').addEventListener('click', async (e) => {
+      e.preventDefault();
+      const body = JSON.stringify({ username: document.getElementById('login-name').value, password: document.getElementById('secret').value });
+      const res = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+      if (res.ok) document.getElementById('welcome').style.display = 'block';
+    });
+  </script>
+</body>
+</html>
