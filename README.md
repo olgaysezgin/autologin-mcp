@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/logo.svg" width="112" height="112" alt="autologin-mcp logo: a key-shaped arrow entering a door">
+  <img src="docs/assets/logo.svg" width="112" height="112" alt="autologin-mcp logo: an asterisk, like a masked password character, inside an open ring">
 </p>
 
 <h1 align="center">autologin-mcp</h1>
