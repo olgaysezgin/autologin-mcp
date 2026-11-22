@@ -86,6 +86,20 @@ function compare(a, b) {
   return 0;
 }
 
+/** Tags on the remote (the source of truth; CI checkouts often have none locally) plus local ones. */
+function gitTags() {
+  const tags = new Set(git('tag', '--list', 'v*').split('\n').filter(Boolean));
+  try {
+    for (const line of git('ls-remote', '--tags', 'origin', 'v*').split('\n')) {
+      const name = line.split('refs/tags/')[1]?.replace(/\^\{\}$/, '');
+      if (name) tags.add(name);
+    }
+  } catch {
+    console.warn('• could not list the tags on origin; using local tags only');
+  }
+  return tags;
+}
+
 async function npmState() {
   const response = await fetch(`https://registry.npmjs.org/${name}`, { headers: { accept: 'application/json' } });
   if (response.status === 404) return { published: [], latest: null };
@@ -106,7 +120,7 @@ async function check({ offline, forRelease }) {
 
   if (offline) return;
   const { published, latest } = await npmState();
-  const tags = new Set(git('tag', '--list', 'v*').split('\n').filter(Boolean));
+  const tags = gitTags();
   const untagged = published.filter((v) => !tags.has(`v${v}`));
   if (untagged.length > 0) fail(`npm has versions without a git tag: ${untagged.join(', ')}`);
   ok(`every npm version has a git tag (${published.length === 0 ? 'none published yet' : published.join(', ')})`);
