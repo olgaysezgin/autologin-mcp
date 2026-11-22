@@ -198,7 +198,7 @@ async function editCommand(ctx: CliContext): Promise<number> {
 }
 
 /**
- * A local path (e.g. ./autologin-mcp-0.1.0.tgz) becomes an absolute `file:` spec:
+ * A local path (e.g. ./autologin-mcp-1.0.0.tgz) becomes an absolute `file:` spec:
  * npx would try to execute a bare path instead of installing it.
  */
 export function packageSpec(spec: string | undefined): string {

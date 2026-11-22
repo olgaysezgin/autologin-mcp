@@ -1,6 +1,6 @@
 {
   "name": "autologin-mcp",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Auto-login MCP server for AI coding agents (Claude Code, Claude in Chrome, Playwright MCP, chrome-devtools-mcp). Logs your agent into the app under test; credentials stay on your machine and never reach the model.",
   "type": "module",
   "bin": {

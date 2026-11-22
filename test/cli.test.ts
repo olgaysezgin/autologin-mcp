@@ -153,7 +153,7 @@ describe('install / uninstall', () => {
   });
 
   it('registers a custom package spec, resolving local tarballs to absolute paths', async () => {
-    const tarball = path.join(home, 'autologin-mcp-0.1.0.tgz');
+    const tarball = path.join(home, 'autologin-mcp-1.0.0.tgz');
     await fs.writeFile(tarball, 'tgz');
     expect(packageSpec(undefined)).toBe(`autologin-mcp@${VERSION}`);
     expect(packageSpec('github:olgaysezgin/autologin-mcp')).toBe('github:olgaysezgin/autologin-mcp');
