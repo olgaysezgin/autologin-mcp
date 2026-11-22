@@ -19,6 +19,8 @@ jobs:
         node: [22, 24]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-tags: true
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
@@ -29,6 +31,9 @@ jobs:
       - run: npm run typecheck
       - name: llms-full.txt is up to date
         run: node scripts/build-llms.mjs --check
+      - name: One version in package.json, git tags, npm, CHANGELOG, docs and website
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 22
+        run: node scripts/release.mjs check
       - name: Tests with coverage (fails below 98%)
         run: npm run coverage
         env:

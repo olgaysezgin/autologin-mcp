@@ -19,7 +19,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "coverage": "vitest run --coverage",
-    "prepublishOnly": "npm run typecheck && npm run coverage && npm run build && npm run smoke",
+    "prepublishOnly": "node scripts/release.mjs publish-guard && npm run typecheck && npm run coverage && npm run build && npm run smoke",
+    "version": "node scripts/release.mjs sync && git add README.md CHANGELOG.md docs",
     "smoke": "node scripts/smoke.mjs"
   },
   "keywords": [
