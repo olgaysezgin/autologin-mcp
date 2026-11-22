@@ -11,7 +11,9 @@
 
 <p align="center">
   <a href="https://github.com/olgaysezgin/autologin-mcp/actions/workflows/ci.yml"><img src="https://github.com/olgaysezgin/autologin-mcp/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://www.npmjs.com/package/autologin-mcp"><img src="https://img.shields.io/npm/v/autologin-mcp" alt="npm"></a>
+  <a href="https://www.npmjs.com/package/autologin-mcp"><img src="https://img.shields.io/npm/v/autologin-mcp" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/autologin-mcp"><img src="https://img.shields.io/npm/dm/autologin-mcp" alt="npm downloads per month"></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/node/v/autologin-mcp" alt="Node.js version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
   <a href="https://olgaysezgin.github.io/autologin-mcp/"><img src="https://img.shields.io/badge/docs-website-4338ca" alt="Documentation website"></a>
 </p>
@@ -20,7 +22,12 @@
   <a href="https://olgaysezgin.github.io/autologin-mcp/">Website</a> ·
   <a href="#quick-use">Quick use</a> ·
   <a href="docs/README.md">Documentation</a> ·
-  <a href="#faq">FAQ</a>
+  <a href="#faq">FAQ</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/demo.gif" width="860" alt="Demo: Claude Code finds an expired session while testing a web app, calls the autologin-mcp login tool, runs the one-time script in Chrome, gets success and continues. The password never appears in the chat.">
 </p>
 
 **autologin-mcp** is an open-source [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server that lets AI coding agents such as **Claude Code** log in to the web app they are testing. When the agent's browser tab shows a login form, a "session expired" message, a 401/403 or a redirect to a login page, the agent calls the `login` tool, and autologin-mcp fills the form with credentials stored on your machine. The username and password never appear in the conversation, so they never reach the model. It works with **Claude in Chrome**, **Playwright MCP** and **chrome-devtools-mcp**, and needs no browser setup.
@@ -54,6 +61,17 @@ npx autologin-mcp add
 4. Optional: turn on `chrome://inspect/#remote-debugging` in Chrome (144+) to let autologin-mcp fill the tab directly (CDP mode).
 
 Upgrade with `npx autologin-mcp@latest install`, remove with `npx autologin-mcp uninstall`. Step-by-step guide: [Getting started](docs/getting-started.md).
+
+## Features
+
+- **Logs in when the agent needs it.** The agent calls `login` when the page shows a login form, a "session expired" message, a 401/403 or a redirect to a login URL, then carries on with its task.
+- **The password never enters the chat.** Credentials go from a file on your machine straight into the page. Tool results are scrubbed of passwords, and a guard hook keeps the agent away from the credentials folder.
+- **No browser setup.** Bridge mode uses the JavaScript tool the agent already has. Turn on Chrome remote debugging and CDP mode fills the tab itself.
+- **Locked to your app's origin.** Credentials are released only to the site of the profile, so a prompt-injected page on another site gets nothing.
+- **Real-world forms.** React, Vue and Angular inputs, forms that render late, submit buttons in many languages, and the page's own error message when a login fails.
+- **No account lockouts.** Three failed logins in five minutes pause the profile until you check the credentials.
+- **Several accounts and apps.** One global credentials file outside your projects, with as many profiles as you need.
+- **One command to install.** `npx autologin-mcp install` registers the MCP server, the skill and the guard hook in Claude Code.
 
 ## Why
 
@@ -155,6 +173,10 @@ npm run build && npm run smoke
 ```
 
 The end-to-end tests start a throwaway headless Chrome (set `CHROME_PATH` if Chrome is not in a standard location). See [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: [SECURITY.md](SECURITY.md).
+
+## Releases
+
+Every release has the same version in `package.json`, the git tag, npm and the [GitHub release](https://github.com/olgaysezgin/autologin-mcp/releases). See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 
 ## License
 
