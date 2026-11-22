@@ -35,7 +35,7 @@ The server itself is a standard stdio MCP server, so other clients can start it.
 ```json
 {
   "mcpServers": {
-    "autologin": { "command": "npx", "args": ["-y", "autologin-mcp@1.0.0"] }
+    "autologin": { "command": "npx", "args": ["-y", "autologin-mcp@1.0.1"] }
   }
 }
 ```
