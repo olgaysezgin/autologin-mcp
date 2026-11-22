@@ -17,7 +17,17 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chivo+Mono:ital,wght@0,400;0,500;1,400&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="assets/site.css">
-  <script>document.documentElement.classList.add('js');</script>
+  <script>
+    (() => {
+      const root = document.documentElement;
+      root.classList.add('js');
+      if ('IntersectionObserver' in window && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        root.classList.add('reveal');
+        // Safety net: if the page script never sets up the reveals, show everything.
+        setTimeout(() => { if (!root.classList.contains('reveal-ready')) root.classList.remove('reveal'); }, 2500);
+      }
+    })();
+  </script>
 
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="autologin-mcp">
@@ -206,7 +216,7 @@
     </div>
 
     <div class="stage-wrap">
-      <figure class="stage" id="demo" aria-label="Demo: Claude Code logs in to a web app with autologin-mcp">
+      <figure class="stage" id="demo" data-reveal="zoom" aria-label="Demo: Claude Code logs in to a web app with autologin-mcp">
         <button class="replay" type="button"><span aria-hidden="true">↻</span> Replay</button>
         <div class="stage-grid">
           <div class="term">
@@ -265,10 +275,10 @@
 
     <section id="why">
       <div class="wrap">
-        <div class="dots"><h2 class="display">Why AI agents need a login tool</h2></div>
-        <p class="lead-mono">An AI agent that tests your web app in a real browser meets a login form sooner or later: a session expires, a token is revoked, a test logs out. Every usual workaround either leaks the password or stops the run.</p>
+        <div class="dots" data-reveal="title"><h2 class="display">Why AI agents need a login tool</h2></div>
+        <p data-reveal class="lead-mono">An AI agent that tests your web app in a real browser meets a login form sooner or later: a session expires, a token is revoked, a test logs out. Every usual workaround either leaks the password or stops the run.</p>
         <div class="bento">
-          <article class="tile w5">
+          <article data-reveal class="tile w5">
             <div class="vis" aria-hidden="true">
               <div class="row"><span class="ok">200</span>GET /api/cart</div>
               <div class="row"><span class="ok">200</span>GET /api/orders</div>
@@ -277,7 +287,7 @@
             </div>
             <div class="txt"><h3>Sessions expire mid-run.</h3> Long agent sessions outlive login sessions. The agent stops, or asks you for the password in the chat.</div>
           </article>
-          <article class="tile w7">
+          <article data-reveal class="tile w7">
             <div class="vis" aria-hidden="true">
               <div class="bubble">The staging password is ••••••••••</div>
               <div class="leak">→ sent to the model provider, kept in transcripts, logs and summaries</div>
@@ -285,7 +295,7 @@
             </div>
             <div class="txt"><h3>Chat is not a vault.</h3> A password pasted into the conversation goes to the model provider and lands in transcripts, logs and context summaries.</div>
           </article>
-          <article class="tile w7">
+          <article data-reveal class="tile w7">
             <div class="vis" aria-hidden="true">
               <div class="row"><span class="y">⏺</span>Read(.env)</div>
               <div class="row">&nbsp;&nbsp;⎿&nbsp; STAGING_USER=qa@example.com</div>
@@ -294,7 +304,7 @@
             </div>
             <div class="txt"><h3>Files the agent reads leak too.</h3> A <code>.env</code> in your project, or any file the agent can open, ends up in the same context, and sometimes in git.</div>
           </article>
-          <article class="tile w5 good">
+          <article data-reveal class="tile w5 good">
             <div class="vis" aria-hidden="true">
               <div class="row"><span class="ok">⏺</span>autologin - login</div>
               <div class="row">&nbsp;&nbsp;⎿&nbsp; status: <span class="ok">"success"</span></div>
@@ -308,18 +318,18 @@
 
     <section id="how-it-works">
       <div class="wrap">
-        <div class="dots"><h2 class="display">How <span class="nowrap">autologin-mcp</span> works</h2></div>
-        <p class="lead-mono">The agent decides <strong>when</strong> to log in. A small deterministic program on your machine does the <strong>how</strong>, with no AI involved.</p>
+        <div class="dots" data-reveal="title"><h2 class="display">How <span class="nowrap">autologin-mcp</span> works</h2></div>
+        <p data-reveal class="lead-mono">The agent decides <strong>when</strong> to log in. A small deterministic program on your machine does the <strong>how</strong>, with no AI involved.</p>
         <div class="how">
           <div>
             <ol class="steps">
-              <li class="active"><button type="button" aria-expanded="true" aria-controls="shot-1"><span class="num">01</span>The agent calls login</button><div class="body"><p>When the tab under test shows a login form, a 401/403, a login redirect or a "session expired" message, the agent calls the <code>login</code> tool with the tab's URL. autologin-mcp picks the matching profile.</p></div><span class="bar"></span></li>
-              <li><button type="button" aria-expanded="false" aria-controls="shot-2"><span class="num">02</span>It gets a one-time script</button><div class="body"><p>The result holds a small loader script that contains only a one-time URL on 127.0.0.1. It expires after 60 seconds and never contains a credential.</p></div><span class="bar"></span></li>
-              <li><button type="button" aria-expanded="false" aria-controls="shot-3"><span class="num">03</span>The page fetches the credentials</button><div class="body"><p>The agent runs the script in the tab. The local bridge releases the credentials only if the browser-set <code>Origin</code> header matches the profile's site, so a page on another site gets nothing.</p></div><span class="bar"></span></li>
-              <li><button type="button" aria-expanded="false" aria-controls="shot-4"><span class="num">04</span>The form is filled and submitted</button><div class="body"><p>autologin-mcp fills the fields the way React, Vue and Angular forms expect, submits, and returns <code>success</code>, or <code>failed</code> with the page's own error message. Then the agent continues the task.</p></div><span class="bar"></span></li>
+              <li data-reveal class="active"><button type="button" aria-expanded="true" aria-controls="shot-1"><span class="num">01</span>The agent calls login</button><div class="body"><p>When the tab under test shows a login form, a 401/403, a login redirect or a "session expired" message, the agent calls the <code>login</code> tool with the tab's URL. autologin-mcp picks the matching profile.</p></div><span class="bar"></span></li>
+              <li data-reveal><button type="button" aria-expanded="false" aria-controls="shot-2"><span class="num">02</span>It gets a one-time script</button><div class="body"><p>The result holds a small loader script that contains only a one-time URL on 127.0.0.1. It expires after 60 seconds and never contains a credential.</p></div><span class="bar"></span></li>
+              <li data-reveal><button type="button" aria-expanded="false" aria-controls="shot-3"><span class="num">03</span>The page fetches the credentials</button><div class="body"><p>The agent runs the script in the tab. The local bridge releases the credentials only if the browser-set <code>Origin</code> header matches the profile's site, so a page on another site gets nothing.</p></div><span class="bar"></span></li>
+              <li data-reveal><button type="button" aria-expanded="false" aria-controls="shot-4"><span class="num">04</span>The form is filled and submitted</button><div class="body"><p>autologin-mcp fills the fields the way React, Vue and Angular forms expect, submits, and returns <code>success</code>, or <code>failed</code> with the page's own error message. Then the agent continues the task.</p></div><span class="bar"></span></li>
             </ol>
           </div>
-          <div class="panel">
+          <div class="panel" data-reveal>
 <pre class="shot active" id="shot-1"><span class="cap">Agent → autologin-mcp</span><span class="t-dot ok">⏺</span> <span class="t-tool">autologin - login</span> <span class="t-args">(MCP)</span>
     <span class="t-key">url</span>: <span class="t-str">"https://staging.example.com/login?next=/checkout"</span>
 
@@ -354,15 +364,15 @@
 # profile, so a wrong password cannot lock the account.</span></pre>
           </div>
         </div>
-        <p class="cdp-note">With Chrome remote debugging turned on, autologin-mcp fills the tab itself over the Chrome DevTools Protocol (CDP), and the agent runs nothing. <a href="how-it-works.html">Bridge mode and CDP mode in detail</a></p>
+        <p data-reveal class="cdp-note">With Chrome remote debugging turned on, autologin-mcp fills the tab itself over the Chrome DevTools Protocol (CDP), and the agent runs nothing. <a href="how-it-works.html">Bridge mode and CDP mode in detail</a></p>
       </div>
     </section>
 
     <section id="quick-start">
       <div class="wrap">
-        <div class="dots"><h2 class="display">Quick start in <span class="keycap">2 min</span></h2></div>
-        <p class="lead-mono">Requires Node.js 22.12+, Claude Code, and a browser tool such as Claude in Chrome. You type the password only into your own terminal.</p>
-        <div class="qs">
+        <div class="dots" data-reveal="title"><h2 class="display">Quick start in <span class="keycap">2 min</span></h2></div>
+        <p data-reveal class="lead-mono">Requires Node.js 22.12+, Claude Code, and a browser tool such as Claude in Chrome. You type the password only into your own terminal.</p>
+        <div class="qs" data-reveal>
           <div class="bar3" aria-hidden="true"><i></i><i></i><i></i></div>
 <pre><code><span class="c"># 1. Register the MCP server, skill and guard hook in Claude Code</span>
 <span class="p">$ </span>npx autologin-mcp install
@@ -376,16 +386,16 @@
 
 <span class="c"># 3. Restart Claude Code and test as usual.</span></code></pre>
         </div>
-        <p class="qs-links">Full guide: <a href="getting-started.html">Getting started</a> · <a href="configuration.html">Configuration</a> · <a href="mcp-tools.html">MCP tools</a> · <a href="cli.html">CLI reference</a></p>
+        <p data-reveal class="qs-links">Full guide: <a href="getting-started.html">Getting started</a> · <a href="configuration.html">Configuration</a> · <a href="mcp-tools.html">MCP tools</a> · <a href="cli.html">CLI reference</a></p>
       </div>
     </section>
 
     <section id="works-with">
       <div class="wrap">
-        <div class="dots"><h2 class="display">Works with your browser tool</h2></div>
-        <p class="lead-mono">autologin-mcp does not replace your browser automation. The agent keeps the browser tool it already has; autologin-mcp only handles the login, then hands the tab back.</p>
+        <div class="dots" data-reveal="title"><h2 class="display">Works with your browser tool</h2></div>
+        <p data-reveal class="lead-mono">autologin-mcp does not replace your browser automation. The agent keeps the browser tool it already has; autologin-mcp only handles the login, then hands the tab back.</p>
         <div class="cards3">
-          <article class="fcard">
+          <article data-reveal class="fcard">
             <h3>Claude in Chrome</h3>
             <p>The primary setup, tested end to end on real apps. The agent runs the <code>script</code> field with <code>javascript_tool</code>.</p>
 <pre><code><span class="t-dim"># Claude Code + Claude in Chrome</span>
@@ -393,7 +403,7 @@
   <span class="t-key">text</span>: <span class="t-str">login.script</span>
 )</code></pre>
           </article>
-          <article class="fcard">
+          <article data-reveal class="fcard">
             <h3>Playwright MCP</h3>
             <p>The agent passes the <code>function</code> field to <code>browser_evaluate</code>, or both share one Chrome over CDP.</p>
 <pre><code><span class="t-dim"># Claude Code + Playwright MCP</span>
@@ -401,7 +411,7 @@
   <span class="t-key">function</span>: <span class="t-str">login.function</span>
 )</code></pre>
           </article>
-          <article class="fcard">
+          <article data-reveal class="fcard">
             <h3>chrome-devtools-mcp</h3>
             <p>The agent passes the <code>function</code> field to <code>evaluate_script</code>, or both share one debug Chrome over CDP.</p>
 <pre><code><span class="t-dim"># Claude Code + chrome-devtools-mcp</span>
@@ -411,33 +421,33 @@
           </article>
         </div>
         <ul class="chips">
-          <li>Claude Code</li><li>Google Chrome</li><li>CDP mode: no JavaScript tool needed</li><li>Any stdio MCP client (manual setup)</li>
+          <li data-reveal>Claude Code</li><li data-reveal>Google Chrome</li><li data-reveal>CDP mode: no JavaScript tool needed</li><li data-reveal>Any stdio MCP client (manual setup)</li>
         </ul>
-        <p class="qs-links"><a href="clients.html">Setup per agent and browser tool</a></p>
+        <p data-reveal class="qs-links"><a href="clients.html">Setup per agent and browser tool</a></p>
       </div>
     </section>
 
     <section id="security">
       <div class="wrap">
-        <div class="dots"><h2 class="display">Built so the model never sees the password</h2></div>
-        <p class="lead-mono">autologin-mcp keeps secrets out of the model context by design, and says plainly what it does not protect against.</p>
+        <div class="dots" data-reveal="title"><h2 class="display">Built so the model never sees the password</h2></div>
+        <p data-reveal class="lead-mono">autologin-mcp keeps secrets out of the model context by design, and says plainly what it does not protect against.</p>
         <div class="sec">
-          <article><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6l8-3z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg></span><h3>Origin-checked bridge</h3><p>Credentials go only to pages whose browser-set Origin belongs to the profile. A prompt-injected page on another site gets nothing.</p></article>
-          <article><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg></span><h3>One-time, loopback only</h3><p>The bridge listens on 127.0.0.1. Each script carries a random token, works once and expires in 60 seconds.</p></article>
-          <article><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span><h3>Guard hook</h3><p>A Claude Code PreToolUse hook and deny rules block the agent from reading the credentials folder, also in skip-permissions mode.</p></article>
-          <article><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.7 10.7 0 0 1 12 5c5.5 0 9 5 10 7-.5 1-1.5 2.6-3 4M6.6 6.6C4.4 8 3 10.3 2 12c1 2 4.5 7 10 7 1.7 0 3.2-.5 4.5-1.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg></span><h3>Redacted results</h3><p>Every tool result and error is scrubbed of each password. Failed attempts clear the password field.</p></article>
-          <article><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/></svg></span><h3>No account lockouts</h3><p>Three failed logins in five minutes pause the profile until you check the credentials.</p></article>
-          <article><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></span><h3>Honest limits</h3><p>It prevents accidental exposure, not a deliberately hostile agent. Use dedicated test accounts. <a href="security.html">Security model</a></p></article>
+          <article data-reveal><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6l8-3z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg></span><h3>Origin-checked bridge</h3><p>Credentials go only to pages whose browser-set Origin belongs to the profile. A prompt-injected page on another site gets nothing.</p></article>
+          <article data-reveal><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg></span><h3>One-time, loopback only</h3><p>The bridge listens on 127.0.0.1. Each script carries a random token, works once and expires in 60 seconds.</p></article>
+          <article data-reveal><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span><h3>Guard hook</h3><p>A Claude Code PreToolUse hook and deny rules block the agent from reading the credentials folder, also in skip-permissions mode.</p></article>
+          <article data-reveal><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.7 10.7 0 0 1 12 5c5.5 0 9 5 10 7-.5 1-1.5 2.6-3 4M6.6 6.6C4.4 8 3 10.3 2 12c1 2 4.5 7 10 7 1.7 0 3.2-.5 4.5-1.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg></span><h3>Redacted results</h3><p>Every tool result and error is scrubbed of each password. Failed attempts clear the password field.</p></article>
+          <article data-reveal><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/></svg></span><h3>No account lockouts</h3><p>Three failed logins in five minutes pause the profile until you check the credentials.</p></article>
+          <article data-reveal><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></span><h3>Honest limits</h3><p>It prevents accidental exposure, not a deliberately hostile agent. Use dedicated test accounts. <a href="security.html">Security model</a></p></article>
         </div>
       </div>
     </section>
 
     <section id="compare">
       <div class="wrap">
-        <div class="dots"><h2 class="display center">Stop pasting passwords<br>into chat</h2></div>
-        <p class="lead-mono center">How autologin-mcp compares with the usual ways of getting an AI agent past a login form.</p>
+        <div class="dots" data-reveal="title"><h2 class="display center">Stop pasting passwords<br>into chat</h2></div>
+        <p data-reveal class="lead-mono center">How autologin-mcp compares with the usual ways of getting an AI agent past a login form.</p>
         <div class="compare">
-          <article class="plan best">
+          <article data-reveal class="plan best">
             <h3><span class="nowrap">autologin-mcp</span></h3>
             <p class="tag">MCP login tool</p>
             <dl>
@@ -448,7 +458,7 @@
             <p class="note">Credentials live in one global file outside your projects.</p>
             <a class="btn primary" href="#install">Install now</a>
           </article>
-          <article class="plan">
+          <article data-reveal class="plan">
             <h3>Paste the password into the chat</h3>
             <p class="tag">Manual</p>
             <dl>
@@ -457,7 +467,7 @@
               <div><dt>Credentials can end up in git</dt><dd>No</dd></div>
             </dl>
           </article>
-          <article class="plan">
+          <article data-reveal class="plan">
             <h3>Put it in the prompt or a project file</h3>
             <p class="tag">Shortcut</p>
             <dl>
@@ -466,7 +476,7 @@
               <div><dt>Credentials can end up in git</dt><dd class="bad">Possible</dd></div>
             </dl>
           </article>
-          <article class="plan">
+          <article data-reveal class="plan">
             <h3>Log in by hand whenever the session expires</h3>
             <p class="tag">Babysitting</p>
             <dl>
@@ -481,18 +491,18 @@
 
     <section id="faq">
       <div class="wrap">
-        <div class="dots"><h2 class="display">Frequently asked questions</h2></div>
+        <div class="dots" data-reveal="title"><h2 class="display">Frequently asked questions</h2></div>
         <div class="faq-list">
-          <details open><summary>How do I let Claude Code log in to my web app without giving it my password?</summary><p>Install autologin-mcp with <code>npx autologin-mcp install</code> and add a login profile in a normal terminal with <code>npx autologin-mcp add</code>. When Claude Code's browser tab shows a login form, Claude calls the <code>login</code> tool and autologin-mcp fills the form with the credentials stored on your machine. Claude only sees the outcome, never the password.</p></details>
-          <details><summary>What happens when my session expires while an AI agent is testing my app?</summary><p>Without autologin-mcp the agent stops or asks you for the password. With autologin-mcp it notices the login form, session-expired message, 401/403 or login redirect, calls <code>login</code>, and continues the task where it left off.</p></details>
-          <details><summary>Does the password ever reach the AI model?</summary><p>No. The password goes from a local credentials file directly into the page, over a one-time 127.0.0.1 bridge that checks the page's origin or through the Chrome DevTools Protocol. Tool results are redacted, and a guard hook blocks the agent from reading the credentials file.</p></details>
-          <details><summary>Which agents and browser tools does autologin-mcp work with?</summary><p>It is built and tested for Claude Code with Claude in Chrome, and also works with Playwright MCP and chrome-devtools-mcp. Other MCP clients can run the stdio server; the installer, skill and guard hook are Claude Code features today.</p></details>
-          <details><summary>Do I need to enable Chrome remote debugging?</summary><p>No. The default bridge mode needs no browser setup. Remote debugging enables CDP mode, which helps when the app's Content-Security-Policy blocks the bridge.</p></details>
-          <details><summary>Can a malicious page trick the agent into sending my credentials to it?</summary><p>A profile only fills pages whose host matches its root URL. The bridge checks the Origin header that the browser sets and page scripts cannot fake, and CDP mode reads the tab's URL from Chrome. A page on another site receives nothing.</p></details>
-          <details><summary>Does autologin-mcp support SSO, two-factor authentication or multi-step logins?</summary><p>Not yet. It handles the common username and password form on the app's own page, including React, Vue and Angular forms. Multi-step logins, iframes, SSO login hosts and TOTP codes are on the roadmap.</p></details>
-          <details><summary>Is autologin-mcp free?</summary><p>Yes. autologin-mcp is open source under the MIT license.</p></details>
+          <details data-reveal open><summary>How do I let Claude Code log in to my web app without giving it my password?</summary><p>Install autologin-mcp with <code>npx autologin-mcp install</code> and add a login profile in a normal terminal with <code>npx autologin-mcp add</code>. When Claude Code's browser tab shows a login form, Claude calls the <code>login</code> tool and autologin-mcp fills the form with the credentials stored on your machine. Claude only sees the outcome, never the password.</p></details>
+          <details data-reveal><summary>What happens when my session expires while an AI agent is testing my app?</summary><p>Without autologin-mcp the agent stops or asks you for the password. With autologin-mcp it notices the login form, session-expired message, 401/403 or login redirect, calls <code>login</code>, and continues the task where it left off.</p></details>
+          <details data-reveal><summary>Does the password ever reach the AI model?</summary><p>No. The password goes from a local credentials file directly into the page, over a one-time 127.0.0.1 bridge that checks the page's origin or through the Chrome DevTools Protocol. Tool results are redacted, and a guard hook blocks the agent from reading the credentials file.</p></details>
+          <details data-reveal><summary>Which agents and browser tools does autologin-mcp work with?</summary><p>It is built and tested for Claude Code with Claude in Chrome, and also works with Playwright MCP and chrome-devtools-mcp. Other MCP clients can run the stdio server; the installer, skill and guard hook are Claude Code features today.</p></details>
+          <details data-reveal><summary>Do I need to enable Chrome remote debugging?</summary><p>No. The default bridge mode needs no browser setup. Remote debugging enables CDP mode, which helps when the app's Content-Security-Policy blocks the bridge.</p></details>
+          <details data-reveal><summary>Can a malicious page trick the agent into sending my credentials to it?</summary><p>A profile only fills pages whose host matches its root URL. The bridge checks the Origin header that the browser sets and page scripts cannot fake, and CDP mode reads the tab's URL from Chrome. A page on another site receives nothing.</p></details>
+          <details data-reveal><summary>Does autologin-mcp support SSO, two-factor authentication or multi-step logins?</summary><p>Not yet. It handles the common username and password form on the app's own page, including React, Vue and Angular forms. Multi-step logins, iframes, SSO login hosts and TOTP codes are on the roadmap.</p></details>
+          <details data-reveal><summary>Is autologin-mcp free?</summary><p>Yes. autologin-mcp is open source under the MIT license.</p></details>
         </div>
-        <p class="faq-more">More answers: <a href="faq.html">FAQ</a> · <a href="troubleshooting.html">Troubleshooting</a> · <a href="llms.txt">llms.txt</a> for AI assistants</p>
+        <p data-reveal class="faq-more">More answers: <a href="faq.html">FAQ</a> · <a href="troubleshooting.html">Troubleshooting</a> · <a href="llms.txt">llms.txt</a> for AI assistants</p>
       </div>
     </section>
   </main>
@@ -517,6 +527,25 @@
     (() => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      // Content reveals on scroll, staggered among siblings
+      const root = document.documentElement;
+      if (root.classList.contains('reveal')) {
+        const targets = [...document.querySelectorAll('[data-reveal]')];
+        for (const el of targets) {
+          const siblings = [...el.parentElement.children].filter((child) => child.hasAttribute('data-reveal'));
+          if (siblings.length > 1) el.style.setProperty('--d', `${Math.min(siblings.indexOf(el), 6) * 100}ms`);
+        }
+        const revealer = new IntersectionObserver((entries) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) continue;
+            entry.target.classList.add('in');
+            revealer.unobserve(entry.target);
+          }
+        }, { rootMargin: '0px 0px -8% 0px', threshold: 0.12 });
+        targets.forEach((el) => revealer.observe(el));
+        root.classList.add('reveal-ready');
+      }
 
       // Copy buttons
       document.querySelectorAll('[data-copy]').forEach((button) => {
