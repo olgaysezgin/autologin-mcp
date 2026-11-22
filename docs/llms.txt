@@ -1,0 +1,34 @@
+# autologin-mcp
+
+> autologin-mcp is an open-source MCP (Model Context Protocol) server that logs AI coding agents such as Claude Code into the web app they are testing. When the agent's browser tab shows a login form, a "session expired" message, a 401/403 or a redirect to a login page, the agent calls the `login` tool, and autologin-mcp fills the form with credentials stored on the user's machine. The password never enters the conversation, so it never reaches the model.
+
+Key facts:
+
+- Install: `npx autologin-mcp install` registers the MCP server, a skill and a guard hook in Claude Code. Then run `npx autologin-mcp add` in a normal terminal (not in the AI chat) to add a login profile: name, root URL, username, hidden password.
+- Credentials live in one global file, `~/.autologin-mcp/credentials.env` (permissions 600), outside every project.
+- MCP tools: `list_profiles`, `login`, `login_status`, `open_config`.
+- Bridge mode (default, no browser setup): `login` returns a one-time script with a 60-second `127.0.0.1` URL; the agent runs it in the tab with its JavaScript tool (Claude in Chrome `javascript_tool`, Playwright MCP `browser_evaluate`, chrome-devtools-mcp `evaluate_script`). The page receives the credentials only if its browser-set Origin header matches the profile.
+- CDP mode (automatic when Chrome remote debugging is on): autologin-mcp fills the tab itself over the Chrome DevTools Protocol.
+- Results: `success`, `submitted`, `failed` (with the page's error message), `no_login_form`, `rate_limited` and others. If the agent's JavaScript call is cut off, `login_status` returns the outcome.
+- Works with Claude Code + Claude in Chrome (tested), Playwright MCP, chrome-devtools-mcp; other MCP clients can run the stdio server.
+- Not supported yet: SSO login hosts, two-factor/TOTP codes, multi-step logins, iframes.
+- Requirements: Node.js 22.12+. License: MIT. Author: Olgay Sezgin.
+
+## Documentation
+
+- [Overview](https://olgaysezgin.github.io/autologin-mcp/docs/): what autologin-mcp is and where to start
+- [Getting started](https://olgaysezgin.github.io/autologin-mcp/getting-started.html): install, add a profile, first automatic login, uninstall
+- [How it works](https://olgaysezgin.github.io/autologin-mcp/how-it-works.html): bridge and CDP modes, form detection, outcome detection
+- [Configuration](https://olgaysezgin.github.io/autologin-mcp/configuration.html): credentials file, profile keys, URL matching, selectors, modes
+- [MCP tools](https://olgaysezgin.github.io/autologin-mcp/mcp-tools.html): tool arguments and every result status
+- [CLI reference](https://olgaysezgin.github.io/autologin-mcp/cli.html): install, uninstall, add, list, remove, edit
+- [Security model](https://olgaysezgin.github.io/autologin-mcp/security.html): protections, threat model and limits
+- [Agents and browser tools](https://olgaysezgin.github.io/autologin-mcp/clients.html): Claude in Chrome, Playwright MCP, chrome-devtools-mcp, other MCP clients
+- [Troubleshooting](https://olgaysezgin.github.io/autologin-mcp/troubleshooting.html): common errors and fixes
+- [FAQ](https://olgaysezgin.github.io/autologin-mcp/faq.html): frequently asked questions
+
+## Optional
+
+- [Full documentation in one file](https://olgaysezgin.github.io/autologin-mcp/llms-full.txt)
+- [Source code on GitHub](https://github.com/olgaysezgin/autologin-mcp)
+- [npm package](https://www.npmjs.com/package/autologin-mcp)

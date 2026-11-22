@@ -1,0 +1,40 @@
+title: autologin-mcp
+description: >-
+  Open-source auto-login MCP server for AI coding agents. Claude Code, Claude in Chrome,
+  Playwright MCP and chrome-devtools-mcp log in to the web app under test, while the
+  password stays on your machine and never reaches the model.
+url: https://olgaysezgin.github.io
+baseurl: /autologin-mcp
+lang: en_US
+logo: /assets/logo-512.png
+author:
+  name: Olgay Sezgin
+  url: https://github.com/olgaysezgin
+twitter:
+  card: summary_large_image
+social:
+  name: autologin-mcp
+  links:
+    - https://github.com/olgaysezgin/autologin-mcp
+    - https://www.npmjs.com/package/autologin-mcp
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  hard_wrap: false
+
+plugins:
+  - jekyll-seo-tag
+  - jekyll-relative-links
+  - jekyll-optional-front-matter
+  - jekyll-default-layout
+
+relative_links:
+  enabled: true
+
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+      image: /assets/og-image.png

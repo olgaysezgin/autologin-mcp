@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>autologin-mcp social card</title>
+<style>
+  html, body { margin: 0; }
+  body {
+    width: 1200px; height: 630px; box-sizing: border-box; padding: 72px 80px;
+    display: flex; align-items: center; gap: 64px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+    color: #F8FAFC;
+    background: radial-gradient(circle at 85% 15%, #155E75 0%, transparent 45%), linear-gradient(135deg, #0B1022 0%, #1E1B4B 100%);
+  }
+  img { width: 300px; height: 300px; flex: none; border-radius: 66px; box-shadow: 0 30px 80px rgba(0, 0, 0, .45); }
+  h1 { margin: 0 0 18px; font-size: 76px; letter-spacing: -2px; line-height: 1; }
+  .tag { margin: 0 0 26px; font-size: 34px; font-weight: 600; color: #C7D2FE; line-height: 1.2; }
+  .sub { margin: 0 0 34px; font-size: 27px; color: #CBD5E1; line-height: 1.4; }
+  .chips { display: flex; flex-wrap: wrap; gap: 12px; }
+  .chips span { font-size: 21px; padding: 8px 16px; border-radius: 999px; background: rgba(255, 255, 255, .09); border: 1px solid rgba(255, 255, 255, .18); }
+</style>
+</head>
+<body>
+  <img src="../docs/assets/logo.svg" alt="">
+  <div>
+    <h1>autologin-mcp</h1>
+    <p class="tag">Auto-login MCP server for AI coding agents</p>
+    <p class="sub">Your agent logs in to the app it is testing.<br>Your password never reaches the model.</p>
+    <div class="chips"><span>Claude Code</span><span>Claude in Chrome</span><span>Playwright MCP</span><span>chrome-devtools-mcp</span></div>
+  </div>
+</body>
+</html>

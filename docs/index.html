@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>autologin-mcp: auto-login MCP server for AI coding agents like Claude Code</title>
+  <meta name="description" content="Open-source MCP server that logs Claude Code and other AI coding agents into the web app they are testing. Credentials stay on your machine and never reach the model.">
+  <meta name="keywords" content="autologin-mcp, MCP server, Model Context Protocol, Claude Code login, AI agent login, auto-login, session expired, browser testing, Claude in Chrome, Playwright MCP, chrome-devtools-mcp, credentials, AI QA testing">
+  <meta name="author" content="Olgay Sezgin">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+  <meta name="theme-color" content="#1e1b4b">
+  <link rel="canonical" href="https://olgaysezgin.github.io/autologin-mcp/">
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+  <link rel="stylesheet" href="assets/site.css">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="autologin-mcp">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:url" content="https://olgaysezgin.github.io/autologin-mcp/">
+  <meta property="og:title" content="autologin-mcp: let your AI agent log in, keep the password">
+  <meta property="og:description" content="Open-source MCP server that logs Claude Code and other AI coding agents into the web app they are testing. Credentials stay on your machine and never reach the model.">
+  <meta property="og:image" content="https://olgaysezgin.github.io/autologin-mcp/assets/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="autologin-mcp: auto-login MCP server for AI coding agents">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="autologin-mcp: let your AI agent log in, keep the password">
+  <meta name="twitter:description" content="Open-source MCP server that logs Claude Code and other AI coding agents into the web app they are testing. Credentials stay on your machine.">
+  <meta name="twitter:image" content="https://olgaysezgin.github.io/autologin-mcp/assets/og-image.png">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://olgaysezgin.github.io/autologin-mcp/#website",
+        "url": "https://olgaysezgin.github.io/autologin-mcp/",
+        "name": "autologin-mcp",
+        "description": "Auto-login MCP server for AI coding agents.",
+        "inLanguage": "en",
+        "publisher": { "@id": "https://olgaysezgin.github.io/autologin-mcp/#author" }
+      },
+      {
+        "@type": "Person",
+        "@id": "https://olgaysezgin.github.io/autologin-mcp/#author",
+        "name": "Olgay Sezgin",
+        "url": "https://github.com/olgaysezgin"
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://olgaysezgin.github.io/autologin-mcp/#software",
+        "name": "autologin-mcp",
+        "alternateName": ["autologin MCP", "auto-login MCP server"],
+        "description": "autologin-mcp is an open-source Model Context Protocol (MCP) server that logs AI coding agents such as Claude Code into the web app they are testing. When the agent's browser tab shows a login form or an expired session, the agent calls the login tool and autologin-mcp fills the form with credentials stored on the user's machine, so the password never reaches the model.",
+        "url": "https://olgaysezgin.github.io/autologin-mcp/",
+        "applicationCategory": "DeveloperApplication",
+        "applicationSubCategory": "MCP server for AI agent browser testing",
+        "operatingSystem": "macOS, Linux",
+        "softwareVersion": "0.1.0",
+        "softwareRequirements": "Node.js 22.12 or newer; an MCP client such as Claude Code; a browser tool such as Claude in Chrome, Playwright MCP or chrome-devtools-mcp",
+        "downloadUrl": "https://www.npmjs.com/package/autologin-mcp",
+        "license": "https://opensource.org/licenses/MIT",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "image": "https://olgaysezgin.github.io/autologin-mcp/assets/og-image.png",
+        "screenshot": "https://olgaysezgin.github.io/autologin-mcp/assets/og-image.png",
+        "author": { "@id": "https://olgaysezgin.github.io/autologin-mcp/#author" },
+        "dateModified": "2026-11-22",
+        "keywords": "MCP server, Model Context Protocol, Claude Code, AI agent login, auto-login, session expired, browser testing, Claude in Chrome, Playwright MCP, chrome-devtools-mcp, credentials, QA",
+        "featureList": [
+          "Logs the agent's browser tab into the app under test when a login form or an expired session appears",
+          "Passwords stay in a local file and never enter the model context",
+          "Bridge mode with no browser setup: a one-time 127.0.0.1 script, credentials released only to the profile's origin",
+          "CDP mode through Chrome remote debugging",
+          "Works with Claude in Chrome, Playwright MCP and chrome-devtools-mcp",
+          "Guard hook and deny rules that keep the agent away from the credentials file",
+          "Rate limiting that prevents account lockouts",
+          "Several accounts per app"
+        ],
+        "sameAs": [
+          "https://github.com/olgaysezgin/autologin-mcp",
+          "https://www.npmjs.com/package/autologin-mcp"
+        ]
+      },
+      {
+        "@type": "SoftwareSourceCode",
+        "@id": "https://olgaysezgin.github.io/autologin-mcp/#source",
+        "name": "autologin-mcp",
+        "codeRepository": "https://github.com/olgaysezgin/autologin-mcp",
+        "programmingLanguage": "TypeScript",
+        "runtimePlatform": "Node.js",
+        "license": "https://opensource.org/licenses/MIT",
+        "author": { "@id": "https://olgaysezgin.github.io/autologin-mcp/#author" },
+        "targetProduct": { "@id": "https://olgaysezgin.github.io/autologin-mcp/#software" }
+      },
+      {
+        "@type": "HowTo",
+        "@id": "https://olgaysezgin.github.io/autologin-mcp/#howto",
+        "name": "How to let an AI coding agent log in to your web app without sharing the password",
+        "totalTime": "PT2M",
+        "tool": [{ "@type": "HowToTool", "name": "Claude Code" }, { "@type": "HowToTool", "name": "Node.js 22.12+" }],
+        "step": [
+          { "@type": "HowToStep", "position": 1, "name": "Install", "text": "Run npx autologin-mcp install to register the MCP server, skill and guard hook in Claude Code." },
+          { "@type": "HowToStep", "position": 2, "name": "Add a login profile", "text": "In a normal terminal, not in the AI chat, run npx autologin-mcp add and enter a profile name, the app's root URL, the username and the hidden password." },
+          { "@type": "HowToStep", "position": 3, "name": "Test as usual", "text": "Restart Claude Code. When the app shows a login form, the agent calls the login tool, runs the one-time script in the tab and continues the task." }
+        ]
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://olgaysezgin.github.io/autologin-mcp/#faq",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "How do I let Claude Code log in to my web app without giving it my password?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Install autologin-mcp with npx autologin-mcp install and add a login profile in a normal terminal with npx autologin-mcp add. When Claude Code's browser tab shows a login form, Claude calls the login tool and autologin-mcp fills the form with the credentials stored on your machine. Claude only sees the outcome, never the password." }
+          },
+          {
+            "@type": "Question",
+            "name": "What happens when my session expires while an AI agent is testing my app?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Without autologin-mcp the agent stops or asks you for the password. With autologin-mcp it notices the login form, session-expired message, 401/403 or login redirect, calls login, and continues the task where it left off." }
+          },
+          {
+            "@type": "Question",
+            "name": "Does the password ever reach the AI model?",
+            "acceptedAnswer": { "@type": "Answer", "text": "No. The password goes from a local credentials file directly into the page, over a one-time 127.0.0.1 bridge that checks the page's origin or through the Chrome DevTools Protocol. Tool results are redacted, and a guard hook blocks the agent from reading the credentials file." }
+          },
+          {
+            "@type": "Question",
+            "name": "Which agents and browser tools does autologin-mcp work with?",
+            "acceptedAnswer": { "@type": "Answer", "text": "It is built and tested for Claude Code with Claude in Chrome, and also works with Playwright MCP and chrome-devtools-mcp. Other MCP clients can run the stdio server; the installer, skill and guard hook are Claude Code features today." }
+          },
+          {
+            "@type": "Question",
+            "name": "Do I need to enable Chrome remote debugging?",
+            "acceptedAnswer": { "@type": "Answer", "text": "No. The default bridge mode needs no browser setup. Remote debugging enables CDP mode, which helps when the app's Content-Security-Policy blocks the bridge." }
+          },
+          {
+            "@type": "Question",
+            "name": "Can a malicious page trick the agent into sending my credentials to it?",
+            "acceptedAnswer": { "@type": "Answer", "text": "A profile only fills pages whose host matches its root URL. The bridge checks the Origin header that the browser sets and page scripts cannot fake, and CDP mode reads the tab's URL from Chrome. A page on another site receives nothing." }
+          },
+          {
+            "@type": "Question",
+            "name": "Does autologin-mcp support SSO, two-factor authentication or multi-step logins?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Not yet. It handles the common username and password form on the app's own page, including React, Vue and Angular forms. Multi-step logins, iframes, SSO login hosts and TOTP codes are on the roadmap." }
+          },
+          {
+            "@type": "Question",
+            "name": "Is autologin-mcp free?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Yes. autologin-mcp is open source under the MIT license." }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="brand" href="./"><img src="assets/logo.svg" alt="" width="32" height="32">autologin-mcp</a>
+      <nav class="topnav" aria-label="Main">
+        <a href="#how-it-works" class="hide-sm">How it works</a>
+        <a href="#quick-start" class="hide-sm">Quick start</a>
+        <a href="docs/">Docs</a>
+        <a href="#faq" class="hide-sm">FAQ</a>
+        <a href="https://github.com/olgaysezgin/autologin-mcp">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="wrap hero">
+      <div>
+        <span class="eyebrow">Open-source MCP server · MIT</span>
+        <h1>Let your AI agent log in.<br><span class="grad">Keep the password.</span></h1>
+        <p class="lead"><strong>autologin-mcp</strong> is an auto-login MCP server for AI coding agents. When Claude Code hits a login page or an expired session while testing your web app, it calls <code>login</code>, and autologin-mcp fills the form with credentials stored on your machine. The password never reaches the model.</p>
+        <div class="install" aria-label="Install command"><span id="cmd">npx autologin-mcp install</span><button type="button" data-copy="cmd">Copy</button></div>
+        <div class="cta">
+          <a class="btn primary" href="getting-started.html">Get started</a>
+          <a class="btn" href="https://github.com/olgaysezgin/autologin-mcp">Star on GitHub</a>
+        </div>
+      </div>
+      <div class="art"><img src="assets/logo.svg" alt="autologin-mcp logo: a key-shaped arrow entering a door" width="340" height="340"></div>
+    </div>
+
+    <section class="alt" id="problem">
+      <div class="wrap">
+        <h2>Why AI agents need a login tool</h2>
+        <p class="sub">An agent that tests your app in a real browser will meet a login form sooner or later. Every usual workaround leaks the password or stops the run.</p>
+        <div class="grid">
+          <article class="card"><h3>Sessions expire mid-run</h3><p>Long agent sessions outlive login sessions. The agent stops, or asks you for the password in the chat.</p></article>
+          <article class="card"><h3>Chat is not a vault</h3><p>A password pasted into the conversation goes to the model provider and lands in transcripts, logs and context summaries.</p></article>
+          <article class="card"><h3>Files the agent reads leak too</h3><p>A <code>.env</code> in your project, or any file the agent can open, ends up in the same context, and sometimes in git.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="how-it-works">
+      <div class="wrap">
+        <h2>How autologin-mcp works</h2>
+        <p class="sub">The agent decides <em>when</em> to log in. A small deterministic program on your machine does the <em>how</em>, with no AI involved.</p>
+        <ol class="steps">
+          <li><strong>The agent calls <code>login</code></strong><span>with the tab's URL, when it sees a login form, a 401/403 or a "session expired" message.</span></li>
+          <li><strong>It gets a one-time script</strong><span>containing only a 60-second URL on 127.0.0.1. No credential is in the request or the response.</span></li>
+          <li><strong>The page fetches the credentials</strong><span>from your machine, released only if the browser-set Origin header matches the profile's site.</span></li>
+          <li><strong>The form is filled and submitted</strong><span>and the agent receives <code>success</code>, or <code>failed</code> with the page's error message. Then it continues.</span></li>
+        </ol>
+        <p class="sub" style="margin-top:28px">With Chrome remote debugging turned on, autologin-mcp fills the tab itself over the Chrome DevTools Protocol, and the agent runs nothing. <a href="how-it-works.html">Read the details</a>.</p>
+      </div>
+    </section>
+
+    <section class="alt" id="quick-start">
+      <div class="wrap">
+        <h2>Quick start</h2>
+        <p class="sub">Requires Node.js 22.12+, Claude Code, and a browser tool such as Claude in Chrome.</p>
+<pre><code># 1. Register the MCP server, skill and guard hook in Claude Code
+npx autologin-mcp install
+
+# 2. Add a login profile. Run this in a normal terminal, not in the AI chat.
+npx autologin-mcp add
+#   Profile name: staging
+#   Root URL: staging.example.com
+#   Username: qa@example.com
+#   Password (hidden):
+
+# 3. Restart Claude Code and test as usual.</code></pre>
+        <p>Full guide: <a href="getting-started.html">Getting started</a> · <a href="configuration.html">Configuration</a> · <a href="mcp-tools.html">MCP tools</a> · <a href="cli.html">CLI reference</a></p>
+      </div>
+    </section>
+
+    <section id="works-with">
+      <div class="wrap">
+        <h2>Works with the browser tool you already use</h2>
+        <p class="sub">autologin-mcp does not replace your browser automation. It only handles the login, then hands the tab back.</p>
+        <ul class="chips">
+          <li>Claude Code</li><li>Claude in Chrome</li><li>Playwright MCP</li><li>chrome-devtools-mcp</li><li>Google Chrome</li><li>Any MCP client (manual setup)</li>
+        </ul>
+        <p style="margin-top:20px"><a href="clients.html">Setup per agent and browser tool</a></p>
+      </div>
+    </section>
+
+    <section class="alt" id="security">
+      <div class="wrap">
+        <h2>Built so the model never sees the password</h2>
+        <div class="grid">
+          <article class="card"><h3>Origin-checked bridge</h3><p>Credentials go only to pages whose browser-set Origin belongs to the profile. A prompt-injected page on another site gets nothing.</p></article>
+          <article class="card"><h3>One-time, loopback only</h3><p>The bridge listens on 127.0.0.1. Each script carries a random token, works once and expires in 60 seconds.</p></article>
+          <article class="card"><h3>Guard hook</h3><p>A Claude Code PreToolUse hook and deny rules block the agent from reading the credentials folder, also in skip-permissions mode.</p></article>
+          <article class="card"><h3>Redacted results</h3><p>Every tool result and error is scrubbed of each password. Failed attempts clear the password field.</p></article>
+          <article class="card"><h3>No account lockouts</h3><p>Three failed logins in five minutes pause the profile until you check the credentials.</p></article>
+          <article class="card"><h3>Honest limits</h3><p>It prevents accidental exposure, not a deliberately hostile agent. Use dedicated test accounts. <a href="security.html">Security model</a></p></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="compare">
+      <div class="wrap">
+        <h2>Compared with the usual workarounds</h2>
+        <table>
+          <thead><tr><th>Approach</th><th>Password reaches the model?</th><th>Agent recovers from an expired session?</th><th>Credentials can end up in git?</th></tr></thead>
+          <tbody>
+            <tr><td>Paste the password into the chat</td><td class="no">Yes</td><td>Only if you paste it again</td><td>No</td></tr>
+            <tr><td>Put it in the prompt or a project file the agent reads</td><td class="no">Yes</td><td>Yes</td><td class="no">Possible</td></tr>
+            <tr><td>Log in by hand whenever the session expires</td><td class="yes">No</td><td class="no">No, the run stops</td><td>No</td></tr>
+            <tr><td><strong>autologin-mcp</strong></td><td class="yes">No</td><td class="yes">Yes</td><td class="yes">No, one global file outside your projects</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="alt faq" id="faq">
+      <div class="wrap">
+        <h2>Frequently asked questions</h2>
+        <details open><summary>How do I let Claude Code log in to my web app without giving it my password?</summary><p>Install autologin-mcp with <code>npx autologin-mcp install</code> and add a login profile in a normal terminal with <code>npx autologin-mcp add</code>. When Claude Code's browser tab shows a login form, Claude calls the <code>login</code> tool and autologin-mcp fills the form with the credentials stored on your machine. Claude only sees the outcome, never the password.</p></details>
+        <details><summary>What happens when my session expires while an AI agent is testing my app?</summary><p>Without autologin-mcp the agent stops or asks you for the password. With autologin-mcp it notices the login form, session-expired message, 401/403 or login redirect, calls <code>login</code>, and continues the task where it left off.</p></details>
+        <details><summary>Does the password ever reach the AI model?</summary><p>No. The password goes from a local credentials file directly into the page, over a one-time 127.0.0.1 bridge that checks the page's origin or through the Chrome DevTools Protocol. Tool results are redacted, and a guard hook blocks the agent from reading the credentials file.</p></details>
+        <details><summary>Which agents and browser tools does autologin-mcp work with?</summary><p>It is built and tested for Claude Code with Claude in Chrome, and also works with Playwright MCP and chrome-devtools-mcp. Other MCP clients can run the stdio server; the installer, skill and guard hook are Claude Code features today.</p></details>
+        <details><summary>Do I need to enable Chrome remote debugging?</summary><p>No. The default bridge mode needs no browser setup. Remote debugging enables CDP mode, which helps when the app's Content-Security-Policy blocks the bridge.</p></details>
+        <details><summary>Can a malicious page trick the agent into sending my credentials to it?</summary><p>A profile only fills pages whose host matches its root URL. The bridge checks the Origin header that the browser sets and page scripts cannot fake, and CDP mode reads the tab's URL from Chrome. A page on another site receives nothing.</p></details>
+        <details><summary>Does autologin-mcp support SSO, two-factor authentication or multi-step logins?</summary><p>Not yet. It handles the common username and password form on the app's own page, including React, Vue and Angular forms. Multi-step logins, iframes, SSO login hosts and TOTP codes are on the roadmap.</p></details>
+        <details><summary>Is autologin-mcp free?</summary><p>Yes. autologin-mcp is open source under the MIT license.</p></details>
+        <p>More answers: <a href="faq.html">FAQ</a> · <a href="troubleshooting.html">Troubleshooting</a></p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site">
+    <div class="wrap">
+      <span>autologin-mcp · MIT License · © 2026 Olgay Sezgin</span>
+      <nav aria-label="Footer">
+        <a href="docs/">Documentation</a>
+        <a href="https://github.com/olgaysezgin/autologin-mcp">GitHub</a>
+        <a href="https://www.npmjs.com/package/autologin-mcp">npm</a>
+        <a href="llms.txt">llms.txt</a>
+        <a href="https://github.com/olgaysezgin/autologin-mcp/blob/main/SECURITY.md">Security</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script>
+    document.querySelectorAll('[data-copy]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const text = document.getElementById(button.dataset.copy).textContent;
+        try { await navigator.clipboard.writeText(text); button.textContent = 'Copied'; } catch { button.textContent = 'Select & copy'; }
+        setTimeout(() => (button.textContent = 'Copy'), 1500);
+      });
+    });
+  </script>
+</body>
+</html>

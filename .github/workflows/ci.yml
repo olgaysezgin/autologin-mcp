@@ -27,6 +27,8 @@ jobs:
         uses: browser-actions/setup-chrome@v1
       - run: npm ci
       - run: npm run typecheck
+      - name: llms-full.txt is up to date
+        run: node scripts/build-llms.mjs --check
       - name: Tests with coverage (fails below 98%)
         run: npm run coverage
         env:

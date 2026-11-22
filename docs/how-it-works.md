@@ -1,0 +1,83 @@
+---
+title: How it works
+description: How autologin-mcp logs an AI agent's browser tab into a web app through bridge mode or Chrome DevTools Protocol (CDP) mode, without the credentials entering the model context.
+---
+
+# How it works
+
+autologin-mcp splits a login into two parts:
+
+- **When to log in** is decided by the agent. It sees the login form or the "session expired" message and calls the `login` tool.
+- **How to log in** is done by a small deterministic program on your machine, with no AI involved. It finds the form, fills it with the credentials from your local file, submits it and reports the outcome.
+
+The agent only ever sees the profile name, the username and the outcome. The password goes from your credentials file straight into the page.
+
+autologin-mcp can reach the tab in two ways and picks one automatically.
+
+## Bridge mode (default, no setup)
+
+```text
+┌─────────────┐ 1. login({url})          ┌───────────────────────────────────────┐
+│ AI agent    │─────────────────────────▶│ autologin-mcp                          │
+│             │◀─ 2. one-time script ────│  credentials.env · 127.0.0.1 bridge    │
+└──────┬──────┘   (no secrets)           └──────────────────▲────────────────────┘
+       │ 3. runs the script in the tab                      │ 4. credentials, only if the browser-set
+       ▼                                                    │    Origin header matches the profile
+┌───────────────────────────────────────────────────────────┴───────────────────┐
+│ The tab under test: fills the form, submits, returns { status } to the agent  │
+└───────────────────────────────────────────────────────────────────────────────┘
+```
+
+1. The agent calls `login` with the tab's URL. autologin-mcp picks the matching profile.
+2. autologin-mcp returns `run_in_page` with a small loader script, in two forms: `script` (an expression, for Claude in Chrome's `javascript_tool`) and `function` (for tools that take a function, such as Playwright MCP's `browser_evaluate` and chrome-devtools-mcp's `evaluate_script`). The loader contains only a one-time URL on `127.0.0.1` that expires after 60 seconds. It never contains a credential.
+3. The agent runs the loader in the tab with the JavaScript tool it already has.
+4. The page loads the form filler from `127.0.0.1` and asks for the credentials. The bridge releases them only if the request's `Origin` header belongs to the profile's root URL. Browsers set this header themselves and page scripts cannot change it, so a page on another site gets nothing.
+5. The filler fills the form, submits it, waits for the outcome and returns it to the agent: `success`, `submitted`, `failed` with the page's error message, or `no_login_form`. It also reports the outcome to autologin-mcp.
+
+If the agent's JavaScript call is cut off (the page navigated, or another extension took over the tab), the login still runs. The agent calls `login_status` to get the outcome the page reported. If the agent runs the same script again instead, it receives the first run's outcome with a note, and the credentials are not released a second time.
+
+## CDP mode (automatic when Chrome remote debugging is on)
+
+When Chrome's remote debugging is reachable, autologin-mcp connects to Chrome itself over the Chrome DevTools Protocol (CDP), finds the tab whose URL matches the request and fills it directly. The agent does not run anything; `login` returns the outcome.
+
+- **Auto-connect:** turn on `chrome://inspect/#remote-debugging` (Chrome 144+). autologin-mcp finds the browser through the `DevToolsActivePort` file in Chrome's profile folder. Chrome asks you to *Allow* the connection once per session.
+- **Dedicated browser:** start a separate Chrome with `--remote-debugging-port=9222` and set `AUTOLOGIN_CDP_URL=http://127.0.0.1:9222` in the credentials file. See [Configuration](configuration.md#use-a-dedicated-debug-chrome).
+- The tab's URL is read from Chrome, not taken from the agent, so a page cannot pretend to be another site.
+
+CDP mode also works for apps whose Content-Security-Policy blocks scripts from `127.0.0.1`, where bridge mode cannot.
+
+## How the mode is chosen
+
+| `AUTOLOGIN_MODE` | Behavior |
+|---|---|
+| `auto` (default) | Try CDP. If Chrome is not reachable (`browser_not_connected`) or the tab is not in that Chrome (`no_matching_tab`), fall back to the bridge. |
+| `bridge` | Always use the bridge. autologin-mcp never touches Chrome directly. |
+| `cdp` | Always use CDP. Return `browser_not_connected` if Chrome is not reachable. |
+
+## How the login form is found
+
+The same detection code runs in both modes, inside the page:
+
+1. **Password field:** the first visible, enabled `input[type=password]`, or the element matching `<PROFILE>_PASSWORD_SELECTOR`.
+2. **Username field:** among the visible text, email and tel inputs before the password field (in the same form when there is one), the best match wins: `autocomplete="username"` or `"email"` first, then `type="email"`, then a name or id that contains user, email, login or account. `<PROFILE>_USERNAME_SELECTOR` overrides this. A form with only a password field works too.
+3. **Submit button:** the form's submit button, or a visible button whose text means "log in" (for example Log in, Sign in, Continue, Giriş yap, Anmelden, Connexion, Entrar, Iniciar sesión). `<PROFILE>_SUBMIT_SELECTOR` overrides this. With no button, autologin-mcp submits the form or presses Enter in the password field.
+
+autologin-mcp waits up to 5 seconds for a form that renders late. In bridge mode, fields are filled through the native value setter followed by `input` and `change` events, which is what React, Vue and Angular controlled inputs listen to. In CDP mode, autologin-mcp focuses each field and inserts the text through the browser's own input pipeline (`Input.insertText`), then clicks the submit button with a real mouse event.
+
+## How the outcome is detected
+
+After submitting, autologin-mcp watches the page for up to 10 seconds:
+
+| What it sees | Result |
+|---|---|
+| The element in `<PROFILE>_SUCCESS_SELECTOR` appears | `success` |
+| The password field disappears (two checks in a row) | `success` |
+| A new error message appears (the message the field points to with `aria-describedby`/`aria-errormessage`, `role="alert"`, or an error-styled element) | `failed`, with that message as `hint` |
+| The page starts navigating (bridge mode) | `submitted`: the agent should look at the page |
+| Still on the form after 10 seconds | `failed` |
+
+On `failed`, the password field is cleared and the password is removed from any text that is returned. After three failed logins in five minutes, the profile is paused (`rate_limited`), so a wrong password cannot lock the account.
+
+## Why not let the agent type the password?
+
+Because then the password is part of the conversation. Everything the agent reads or writes is sent to the model provider and can end up in transcripts, logs and context summaries. A file the agent can read has the same problem. autologin-mcp keeps the password in a process the model cannot see and gives the model only the outcome.

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {% seo %}
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+  <meta name="theme-color" content="#1e1b4b">
+  <link rel="icon" href="{{ '/assets/logo.svg' | relative_url }}" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="{{ '/assets/apple-touch-icon.png' | relative_url }}">
+  <link rel="stylesheet" href="{{ '/assets/site.css' | relative_url }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="brand" href="{{ '/' | relative_url }}"><img src="{{ '/assets/logo.svg' | relative_url }}" alt="" width="32" height="32">autologin-mcp</a>
+      <nav class="topnav" aria-label="Main">
+        <a href="{{ '/docs/' | relative_url }}">Docs</a>
+        <a href="{{ '/getting-started.html' | relative_url }}" class="hide-sm">Getting started</a>
+        <a href="{{ '/faq.html' | relative_url }}" class="hide-sm">FAQ</a>
+        <a href="https://github.com/olgaysezgin/autologin-mcp">GitHub</a>
+      </nav>
+    </div>
+  </header>
+  {% assign docs = "/docs/|Overview,/getting-started.html|Getting started,/how-it-works.html|How it works,/configuration.html|Configuration,/mcp-tools.html|MCP tools,/cli.html|CLI reference,/security.html|Security model,/clients.html|Agents and browser tools,/troubleshooting.html|Troubleshooting,/faq.html|FAQ" | split: "," %}
+  <div class="wrap doc-layout">
+    <aside class="sidebar">
+      <nav aria-label="Documentation">
+        <p class="label">Documentation</p>
+        {% for item in docs %}{% assign parts = item | split: "|" %}
+        <a href="{{ parts[0] | relative_url }}"{% if page.url == parts[0] %} aria-current="page"{% endif %}>{{ parts[1] }}</a>
+        {% endfor %}
+      </nav>
+    </aside>
+    <main class="prose">
+      {{ content }}
+      <p class="edit"><a href="https://github.com/olgaysezgin/autologin-mcp/blob/main/docs/{{ page.path }}">Edit this page on GitHub</a></p>
+    </main>
+  </div>
+  <footer class="site">
+    <div class="wrap">
+      <span>autologin-mcp · MIT License · © 2026 Olgay Sezgin</span>
+      <nav aria-label="Footer">
+        <a href="https://github.com/olgaysezgin/autologin-mcp">GitHub</a>
+        <a href="https://www.npmjs.com/package/autologin-mcp">npm</a>
+        <a href="{{ '/llms.txt' | relative_url }}">llms.txt</a>
+        <a href="https://github.com/olgaysezgin/autologin-mcp/blob/main/SECURITY.md">Security</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>

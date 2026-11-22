@@ -1,0 +1,747 @@
+# autologin-mcp: full documentation
+
+> Source: https://olgaysezgin.github.io/autologin-mcp/ and https://github.com/olgaysezgin/autologin-mcp. Generated from docs/*.md by scripts/build-llms.mjs.
+
+---
+
+<!-- https://olgaysezgin.github.io/autologin-mcp/docs/ -->
+
+# autologin-mcp documentation
+
+autologin-mcp is an open-source [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for AI coding agents such as Claude Code. When the agent's browser tab hits a login form or an expired session while it tests your web app, the agent calls the `login` tool, and autologin-mcp fills in the form with credentials stored on your machine. The username and password never appear in the conversation, so they never reach the model.
+
+## Contents
+
+| Page | What it covers |
+|---|---|
+| [Getting started](getting-started.md) | Requirements, installation, your first profile, the first automatic login, uninstalling |
+| [How it works](how-it-works.md) | Bridge mode and CDP mode, how the login form is found and filled, how the outcome is detected |
+| [Configuration](configuration.md) | The credentials file, profile keys, URL matching, selectors, modes and environment variables |
+| [MCP tools](mcp-tools.md) | `list_profiles`, `login`, `login_status`, `open_config`, and every result status with what the agent should do |
+| [CLI reference](cli.md) | `install`, `uninstall`, `add`, `list`, `remove`, `edit`, and exactly what `install` changes |
+| [Security model](security.md) | What keeps the password away from the model, the threat model, and the limits |
+| [Agents and browser tools](clients.md) | Claude Code with Claude in Chrome, Playwright MCP, chrome-devtools-mcp and other MCP clients |
+| [Troubleshooting](troubleshooting.md) | Every common error and how to fix it |
+| [FAQ](faq.md) | Short answers to the questions people ask most |
+
+## The 30-second version
+
+```bash
+npx autologin-mcp install   # registers the MCP server, a skill and a guard hook in Claude Code
+npx autologin-mcp add       # run in a normal terminal: profile name, root URL, username, hidden password
+```
+
+Restart Claude Code and test your app as usual. When a page asks for a login, the agent calls `login`, runs the one-time script it gets back in the tab, and continues with the task.
+
+## Links
+
+- Source code: [github.com/olgaysezgin/autologin-mcp](https://github.com/olgaysezgin/autologin-mcp)
+- Website: [olgaysezgin.github.io/autologin-mcp](https://olgaysezgin.github.io/autologin-mcp/)
+- Machine-readable summary for AI assistants: [llms.txt](https://olgaysezgin.github.io/autologin-mcp/llms.txt) and [llms-full.txt](https://olgaysezgin.github.io/autologin-mcp/llms-full.txt)
+- Report a vulnerability: [SECURITY.md](https://github.com/olgaysezgin/autologin-mcp/blob/main/SECURITY.md)
+
+---
+
+<!-- https://olgaysezgin.github.io/autologin-mcp/getting-started.html -->
+
+# Getting started
+
+This guide takes you from nothing to an agent that logs itself back in when your app shows a login form.
+
+## Requirements
+
+- **Node.js 22.12 or newer.**
+- **[Claude Code](https://claude.com/claude-code).** The installer, skill and guard hook are written for Claude Code. Other MCP clients can run the server too, see [Agents and browser tools](clients.md).
+- **A browser tool for the agent** that can run JavaScript in a tab, for example Claude in Chrome, Playwright MCP or chrome-devtools-mcp.
+- **A test account for the app you are testing.** Do not use your personal or production account, see [Security model](security.md).
+
+## 1. Install
+
+```bash
+npx autologin-mcp install
+```
+
+This one command:
+
+1. registers the `autologin` MCP server in Claude Code at user scope, pinned to the exact version you ran;
+2. writes a skill (`~/.claude/skills/autologin/SKILL.md`) that tells the agent when and how to use it;
+3. adds a `PreToolUse` guard hook and `Read`/`Edit` deny rules that keep the credentials folder out of the model's reach.
+
+Add `--dry-run` to see the changes without applying them. [CLI reference](cli.md#install) lists every change in detail.
+
+> **To install from source** (an unreleased version, a fork, or your own change), build a package and install from it:
+>
+> ```bash
+> git clone https://github.com/olgaysezgin/autologin-mcp.git && cd autologin-mcp
+> npm install && npm run build && npm pack
+> npx -y file:./autologin-mcp-0.1.0.tgz install --package ./autologin-mcp-0.1.0.tgz
+> ```
+
+## 2. Add a login profile
+
+Run this in a **normal terminal, not inside the AI chat**, so the password never passes through the conversation:
+
+```bash
+npx autologin-mcp add
+#   Profile name (e.g. staging): staging
+#   Root URL (e.g. example.com or localhost:3000): staging.example.com
+#   Username: qa@example.com
+#   Password (hidden):
+```
+
+The profile is saved in `~/.autologin-mcp/credentials.env` with file permissions `600`. You can add as many profiles as you like, including several accounts for the same app (for example `admin` and `viewer`). [Configuration](configuration.md) describes the file format.
+
+Check what the agent will see:
+
+```bash
+npx autologin-mcp list
+```
+
+## 3. Restart Claude Code and test as usual
+
+Restart Claude Code so it starts the new MCP server. Then work as you normally would:
+
+```text
+You:    Test the checkout flow on staging.
+Agent:  …opens staging.example.com → the app redirects to /login
+Agent:  calls autologin.login({ url: "https://staging.example.com/login" })
+Agent:  runs the returned one-time script in the tab → { "status": "success" }
+Agent:  continues the checkout test
+```
+
+You do not have to mention autologin-mcp in your prompt. The MCP server's instructions and the skill tell the agent to call `login` whenever a page shows a login form, a "session expired" message, a 401/403 or a redirect to a login URL.
+
+## 4. Optional: turn on CDP mode
+
+By default autologin-mcp uses **bridge mode**, which needs no browser setup. If your app's Content-Security-Policy blocks the bridge, or you prefer that autologin-mcp fills the tab itself, open `chrome://inspect/#remote-debugging` in Chrome (version 144 or newer) and turn remote debugging on. autologin-mcp then switches to **CDP mode** automatically. See [How it works](how-it-works.md).
+
+## Update
+
+`install` pins the version, so autologin-mcp never updates silently. To upgrade:
+
+```bash
+npx autologin-mcp@latest install
+```
+
+## Uninstall
+
+```bash
+npx autologin-mcp uninstall          # keeps your credentials file
+npx autologin-mcp uninstall --purge  # also deletes ~/.autologin-mcp
+```
+
+## Next steps
+
+- [How it works](how-it-works.md): what happens between `login` and `success`.
+- [Configuration](configuration.md): selectors for unusual login forms, URL matching, modes.
+- [Troubleshooting](troubleshooting.md): what to do when a login does not go through.
+
+---
+
+<!-- https://olgaysezgin.github.io/autologin-mcp/how-it-works.html -->
+
+# How it works
+
+autologin-mcp splits a login into two parts:
+
+- **When to log in** is decided by the agent. It sees the login form or the "session expired" message and calls the `login` tool.
+- **How to log in** is done by a small deterministic program on your machine, with no AI involved. It finds the form, fills it with the credentials from your local file, submits it and reports the outcome.
+
+The agent only ever sees the profile name, the username and the outcome. The password goes from your credentials file straight into the page.
+
+autologin-mcp can reach the tab in two ways and picks one automatically.
+
+## Bridge mode (default, no setup)
+
+```text
+┌─────────────┐ 1. login({url})          ┌───────────────────────────────────────┐
+│ AI agent    │─────────────────────────▶│ autologin-mcp                          │
+│             │◀─ 2. one-time script ────│  credentials.env · 127.0.0.1 bridge    │
+└──────┬──────┘   (no secrets)           └──────────────────▲────────────────────┘
+       │ 3. runs the script in the tab                      │ 4. credentials, only if the browser-set
+       ▼                                                    │    Origin header matches the profile
+┌───────────────────────────────────────────────────────────┴───────────────────┐
+│ The tab under test: fills the form, submits, returns { status } to the agent  │
+└───────────────────────────────────────────────────────────────────────────────┘
+```
+
+1. The agent calls `login` with the tab's URL. autologin-mcp picks the matching profile.
+2. autologin-mcp returns `run_in_page` with a small loader script, in two forms: `script` (an expression, for Claude in Chrome's `javascript_tool`) and `function` (for tools that take a function, such as Playwright MCP's `browser_evaluate` and chrome-devtools-mcp's `evaluate_script`). The loader contains only a one-time URL on `127.0.0.1` that expires after 60 seconds. It never contains a credential.
+3. The agent runs the loader in the tab with the JavaScript tool it already has.
+4. The page loads the form filler from `127.0.0.1` and asks for the credentials. The bridge releases them only if the request's `Origin` header belongs to the profile's root URL. Browsers set this header themselves and page scripts cannot change it, so a page on another site gets nothing.
+5. The filler fills the form, submits it, waits for the outcome and returns it to the agent: `success`, `submitted`, `failed` with the page's error message, or `no_login_form`. It also reports the outcome to autologin-mcp.
+
+If the agent's JavaScript call is cut off (the page navigated, or another extension took over the tab), the login still runs. The agent calls `login_status` to get the outcome the page reported. If the agent runs the same script again instead, it receives the first run's outcome with a note, and the credentials are not released a second time.
+
+## CDP mode (automatic when Chrome remote debugging is on)
+
+When Chrome's remote debugging is reachable, autologin-mcp connects to Chrome itself over the Chrome DevTools Protocol (CDP), finds the tab whose URL matches the request and fills it directly. The agent does not run anything; `login` returns the outcome.
+
+- **Auto-connect:** turn on `chrome://inspect/#remote-debugging` (Chrome 144+). autologin-mcp finds the browser through the `DevToolsActivePort` file in Chrome's profile folder. Chrome asks you to *Allow* the connection once per session.
+- **Dedicated browser:** start a separate Chrome with `--remote-debugging-port=9222` and set `AUTOLOGIN_CDP_URL=http://127.0.0.1:9222` in the credentials file. See [Configuration](configuration.md#use-a-dedicated-debug-chrome).
+- The tab's URL is read from Chrome, not taken from the agent, so a page cannot pretend to be another site.
+
+CDP mode also works for apps whose Content-Security-Policy blocks scripts from `127.0.0.1`, where bridge mode cannot.
+
+## How the mode is chosen
+
+| `AUTOLOGIN_MODE` | Behavior |
+|---|---|
+| `auto` (default) | Try CDP. If Chrome is not reachable (`browser_not_connected`) or the tab is not in that Chrome (`no_matching_tab`), fall back to the bridge. |
+| `bridge` | Always use the bridge. autologin-mcp never touches Chrome directly. |
+| `cdp` | Always use CDP. Return `browser_not_connected` if Chrome is not reachable. |
+
+## How the login form is found
+
+The same detection code runs in both modes, inside the page:
+
+1. **Password field:** the first visible, enabled `input[type=password]`, or the element matching `<PROFILE>_PASSWORD_SELECTOR`.
+2. **Username field:** among the visible text, email and tel inputs before the password field (in the same form when there is one), the best match wins: `autocomplete="username"` or `"email"` first, then `type="email"`, then a name or id that contains user, email, login or account. `<PROFILE>_USERNAME_SELECTOR` overrides this. A form with only a password field works too.
+3. **Submit button:** the form's submit button, or a visible button whose text means "log in" (for example Log in, Sign in, Continue, Giriş yap, Anmelden, Connexion, Entrar, Iniciar sesión). `<PROFILE>_SUBMIT_SELECTOR` overrides this. With no button, autologin-mcp submits the form or presses Enter in the password field.
+
+autologin-mcp waits up to 5 seconds for a form that renders late. In bridge mode, fields are filled through the native value setter followed by `input` and `change` events, which is what React, Vue and Angular controlled inputs listen to. In CDP mode, autologin-mcp focuses each field and inserts the text through the browser's own input pipeline (`Input.insertText`), then clicks the submit button with a real mouse event.
+
+## How the outcome is detected
+
+After submitting, autologin-mcp watches the page for up to 10 seconds:
+
+| What it sees | Result |
+|---|---|
+| The element in `<PROFILE>_SUCCESS_SELECTOR` appears | `success` |
+| The password field disappears (two checks in a row) | `success` |
+| A new error message appears (the message the field points to with `aria-describedby`/`aria-errormessage`, `role="alert"`, or an error-styled element) | `failed`, with that message as `hint` |
+| The page starts navigating (bridge mode) | `submitted`: the agent should look at the page |
+| Still on the form after 10 seconds | `failed` |
+
+On `failed`, the password field is cleared and the password is removed from any text that is returned. After three failed logins in five minutes, the profile is paused (`rate_limited`), so a wrong password cannot lock the account.
+
+## Why not let the agent type the password?
+
+Because then the password is part of the conversation. Everything the agent reads or writes is sent to the model provider and can end up in transcripts, logs and context summaries. A file the agent can read has the same problem. autologin-mcp keeps the password in a process the model cannot see and gives the model only the outcome.
+
+---
+
+<!-- https://olgaysezgin.github.io/autologin-mcp/configuration.html -->
+
+# Configuration
+
+All configuration lives in one file per user: `~/.autologin-mcp/credentials.env`. It is global on purpose. It sits outside your projects, so it never ends up in git, and the same profiles work in every project.
+
+- `npx autologin-mcp add` creates the file and adds profiles for you, with permissions `600` (only your user can read it).
+- `npx autologin-mcp edit` opens it in `$VISUAL`, `$EDITOR` or your default editor.
+- The agent can ask you to edit it with the `open_config` tool. The tool opens the file in your editor and never returns its content.
+
+Edit the file yourself, in a terminal or an editor, never through the AI chat.
+
+## File format
+
+The file uses the `.env` format: one `KEY=value` per line, `#` starts a comment. Quote a value with single quotes if it contains spaces or `#`. An `export ` prefix is allowed.
+
+```env
+STAGING_URL=staging.example.com
+STAGING_USERNAME=qa@example.com
+STAGING_PASSWORD='p@ss w0rd#1'
+
+LOCAL_URL=localhost:3000
+LOCAL_USERNAME=admin
+LOCAL_PASSWORD=admin
+LOCAL_USERNAME_SELECTOR=#email
+LOCAL_PASSWORD_SELECTOR=#password
+LOCAL_SUBMIT_SELECTOR=button[type=submit]
+LOCAL_SUCCESS_SELECTOR=[data-test=user-menu]
+
+AUTOLOGIN_MODE=auto
+```
+
+## Profiles
+
+A profile is a group of keys that share a prefix. `STAGING_URL`, `STAGING_USERNAME` and `STAGING_PASSWORD` form the profile `staging`. Profile names are case-insensitive; the agent sees them in lower case.
+
+| Key | Required | Meaning |
+|---|---|---|
+| `<PROFILE>_URL` | yes | Root URL of the app, for example `example.com`, `staging.example.com`, `localhost:3000` or `*.example.com` |
+| `<PROFILE>_USERNAME` | yes | Username or email to log in with. The agent can see it. |
+| `<PROFILE>_PASSWORD` | yes | Password. Never shown to the agent. |
+| `<PROFILE>_USERNAME_SELECTOR` | no | CSS selector of the username field, when it is not detected automatically |
+| `<PROFILE>_PASSWORD_SELECTOR` | no | CSS selector of the password field |
+| `<PROFILE>_SUBMIT_SELECTOR` | no | CSS selector of the element to click to log in |
+| `<PROFILE>_SUCCESS_SELECTOR` | no | CSS selector of an element that only exists after a successful login, for apps where the login form stays on the page |
+| `<PROFILE>_AUTO_LOGIN` | no | Reserved for the planned opt-in auto-login (`true`/`false`). It has no effect yet. |
+
+A profile with a missing or invalid key is listed with its `problems` by `list_profiles` and `npx autologin-mcp list`, and is not used for logins.
+
+### Several accounts for the same app
+
+Profiles may share a URL:
+
+```env
+ADMIN_URL=staging.example.com
+ADMIN_USERNAME=admin@example.com
+ADMIN_PASSWORD=...
+
+VIEWER_URL=staging.example.com
+VIEWER_USERNAME=viewer@example.com
+VIEWER_PASSWORD=...
+```
+
+When several profiles match a tab, `login` returns `ambiguous_profile` with the candidates, and the agent calls it again with `profile`. You can also tell the agent which account to use ("log in as the viewer").
+
+## URL matching
+
+A profile only fills pages whose host matches its root URL. This is what stops a prompt-injected page on another site from receiving your credentials.
+
+- **Root URL only.** Write `example.com` or `localhost:3000`. A scheme or a path is ignored.
+- `example.com` matches `example.com` and `www.example.com`.
+- `*.example.com` matches `example.com` and every subdomain.
+- **Ports:** when the root URL has a port, the tab's port must be the same. Without a port, only the default ports 80 and 443 match.
+- `localhost`, `127.0.0.1` and `[::1]` count as the same host.
+
+## Settings
+
+Settings are keys that start with `AUTOLOGIN_` in the same file.
+
+| Key | Values | Meaning |
+|---|---|---|
+| `AUTOLOGIN_MODE` | `auto` (default), `bridge`, `cdp` | How autologin-mcp reaches the tab. See [How it works](how-it-works.md#how-the-mode-is-chosen). |
+| `AUTOLOGIN_CDP_URL` | `http://127.0.0.1:9222` or a `ws://` endpoint | Use this Chrome for CDP mode instead of auto-connecting to your everyday Chrome |
+
+### Use a dedicated debug Chrome
+
+If you want CDP mode without turning on remote debugging in your everyday Chrome, start a separate Chrome with its own profile:
+
+```bash
+# macOS
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 --user-data-dir="$HOME/.autologin-mcp/chrome"
+# Linux
+google-chrome --remote-debugging-port=9222 --user-data-dir="$HOME/.autologin-mcp/chrome"
+```
+
+Add `AUTOLOGIN_CDP_URL=http://127.0.0.1:9222` to the credentials file, and point the agent's browser tool at the same browser: Playwright MCP with `--cdp-endpoint http://127.0.0.1:9222`, chrome-devtools-mcp with `--browserUrl http://127.0.0.1:9222`.
+
+A separate Chrome profile without password managers also avoids extensions that take over the tab after a login form is submitted.
+
+## Environment variables
+
+| Variable | Meaning |
+|---|---|
+| `AUTOLOGIN_HOME` | Use this folder instead of `~/.autologin-mcp` for the credentials file |
+| `VISUAL`, `EDITOR` | Editor used by `npx autologin-mcp edit` |
+| `CHROME_PATH` | Chrome binary for the end-to-end tests (development only) |
+
+The values in the credentials file are parsed in memory. They are never copied into `process.env`, so child processes and error reports cannot pick them up.
+
+---
+
+<!-- https://olgaysezgin.github.io/autologin-mcp/mcp-tools.html -->
+
+# MCP tools
+
+autologin-mcp is a stdio MCP server named `autologin`. In Claude Code its tools appear as `mcp__autologin__<tool>`. Every tool result passes through a redactor that removes each configured password (and its URL-encoded form) before it is returned.
+
+## `list_profiles`
+
+Lists the configured profiles. Passwords are never returned.
+
+```json
+{
+  "file": "/home/you/.autologin-mcp/credentials.env",
+  "profiles": [
+    { "profile": "staging", "url": "staging.example.com", "username": "qa@example.com" },
+    { "profile": "local", "url": "localhost:3000", "username": "admin", "problems": ["LOCAL_PASSWORD is missing"] }
+  ]
+}
+```
+
+With no profiles, the result includes a `hint` that asks the user to run `npx autologin-mcp add` in a separate terminal.
+
+## `login`
+
+Logs the tab under test into its app.
+
+| Argument | Type | Meaning |
+|---|---|---|
+| `url` | string, optional | The tab's current URL. Recommended: it selects the profile and, in CDP mode, the tab. |
+| `profile` | string, optional | Profile name from `list_profiles`. Needed only when several profiles match. |
+
+**In bridge mode** it returns `run_in_page`:
+
+```json
+{
+  "status": "run_in_page",
+  "profile": "staging",
+  "hint": "Run `script` unchanged in the tab that shows the login form ...",
+  "expires_in_s": 60,
+  "script": "await (async () => ...)()",
+  "function": "async () => ..."
+}
+```
+
+The agent runs `script` (Claude in Chrome `javascript_tool`) or `function` (Playwright MCP `browser_evaluate`, chrome-devtools-mcp `evaluate_script`) **unchanged** in the tab. The value it returns is the login result below. The script works once, within 60 seconds, and only on a page of the profile's site.
+
+**In CDP mode** it fills the tab itself and returns the login result directly.
+
+### Login results
+
+| `status` | Meaning | What the agent should do |
+|---|---|---|
+| `success` | Logged in. `url` is the page after login. | Continue the task. |
+| `submitted` | The form was submitted and the page navigated before the outcome was visible (bridge mode). | Look at the page to confirm the login. |
+| `failed` | Still on the login form. `hint` carries the page's error message (password removed), `reason` the cause. | Tell the user the `hint`. Retry at most once. |
+| `no_login_form` | No visible password field was found. If `previous_login` shows a recent `success` or `submitted`, the tab is already logged in. | With `previous_login`: continue. Otherwise ask the user to set selectors for the profile. |
+| `origin_mismatch` | The URL or the page's origin does not belong to any (or the requested) profile. Nothing was filled. | Ask the user to add a profile for this site. |
+| `ambiguous_profile` | Several profiles match. `candidates` lists them. | Call `login` again with `profile`. |
+| `ambiguous_tab` | CDP mode: several open tabs match. | Call `login` again with the exact `url` of the tab. |
+| `no_matching_tab` | CDP mode: no open tab has that URL. In `auto` mode autologin-mcp falls back to the bridge instead. | Check the URL. |
+| `no_profile` | No usable profile, or no profile with that name. | Ask the user to run `npx autologin-mcp add` in a separate terminal, or call `open_config`. |
+| `invalid_profile` | The named profile has problems (see `hint`). | Ask the user to fix the credentials file. |
+| `expired` | The one-time script expired or was already used and its outcome is unknown. | Call `login_status`, or `login` again. |
+| `browser_not_connected` | `AUTOLOGIN_MODE=cdp` and Chrome is not reachable. | Ask the user to enable `chrome://inspect/#remote-debugging`. |
+| `rate_limited` | Three failed logins in five minutes for this profile (or 20 credential releases in five minutes in bridge mode). | Stop and ask the user to check the credentials. |
+| `error` | Something unexpected, explained in `hint` (for example the page's Content-Security-Policy blocked the bridge). | Report the `hint` to the user. |
+
+### `previous_login`
+
+An agent whose JavaScript call was cut off often just calls `login` again, on a page that is already logged in. That run finds no form, so its `no_login_form` result also carries the profile's last real outcome from the past five minutes:
+
+```json
+{
+  "status": "no_login_form",
+  "url": "https://staging.example.com/dashboard",
+  "hint": "No login form on this page, and the previous login for this profile (success at 2026-01-15T09:42:10.000Z) went through: the tab is most likely already logged in. Look at the page and continue; call login again only if it shows a login form.",
+  "previous_login": { "status": "success", "at": "2026-01-15T09:42:10.000Z", "url": "https://staging.example.com/dashboard" }
+}
+```
+
+## `login_status`
+
+Returns the latest outcome per profile, as reported by the page in bridge mode or by the engine in CDP mode. The agent uses it when running the `run_in_page` script failed or returned nothing, for example because the page navigated or another browser extension took over the tab.
+
+| Argument | Type | Meaning |
+|---|---|---|
+| `profile` | string, optional | Only this profile |
+
+```json
+{
+  "results": [
+    { "profile": "staging", "status": "success", "url": "https://staging.example.com/dashboard", "via": "bridge", "at": "2026-01-15T09:30:05.000Z" }
+  ]
+}
+```
+
+Outcomes are kept in memory for the lifetime of the MCP server process.
+
+## `open_config`
+
+Creates the credentials file if needed and opens it in the user's editor, so they can add or change profiles themselves. The file content is never returned. If no editor can be opened, the result asks the user to run `npx autologin-mcp edit`.
+
+## Server instructions
+
+The server sends these instructions to the MCP client at startup, so even an agent with no skill or memory knows when to use it:
+
+- When a page under test shows a login form, a "session expired" message, a 401/403, or redirects to a login URL, call `login`, then continue the task.
+- If `login` returns `run_in_page`, run `script` unchanged in the tab; if that call fails or returns nothing, call `login_status`.
+- Never ask the user for a password, never type credentials into a page, never read files under `~/.autologin-mcp`, never modify the login script, and do not inspect the login request body or read password field values.
+
+---
+
+<!-- https://olgaysezgin.github.io/autologin-mcp/cli.html -->
+
+# CLI reference
+
+```text
+npx autologin-mcp                    Run the MCP server on stdio (what Claude Code starts)
+npx autologin-mcp install [-y] [--dry-run] [--package <spec>]
+npx autologin-mcp uninstall [-y] [--dry-run] [--purge]
+npx autologin-mcp add [name] [--url <root-url>] [--username <user>]
+npx autologin-mcp list
+npx autologin-mcp remove <name> [-y]
+npx autologin-mcp edit
+npx autologin-mcp --version | --help
+```
+
+Run `add`, `edit` and `remove` in a normal terminal, never inside an AI chat.
+
+## `install`
+
+Registers autologin-mcp in Claude Code.
+
+| Step | Where |
+|---|---|
+| MCP server `autologin` at user scope: `claude mcp add --scope user autologin -- npx -y autologin-mcp@<version>` | Claude Code's user configuration |
+| The skill that tells the agent when and how to log in | `~/.claude/skills/autologin/SKILL.md` |
+| The guard hook script | `~/.claude/hooks/autologin-guard.mjs` |
+| A `PreToolUse` hook entry that runs the guard, and `Read(~/.autologin-mcp/**)` / `Edit(~/.autologin-mcp/**)` deny rules | `~/.claude/settings.json` (backed up first to `settings.json.autologin-backup`) |
+| An empty credentials file with permissions `600`, if none exists | `~/.autologin-mcp/credentials.env` |
+
+| Flag | Meaning |
+|---|---|
+| `-y`, `--yes` | Do not ask for confirmation |
+| `--dry-run` | Print the changes without applying them |
+| `--package <spec>` | What `npx` should run instead of `autologin-mcp@<version>`: a local `.tgz`, a fork, or a git ref. Local paths are turned into `file:` specs. |
+
+`install` pins the exact version, because a tool that handles credentials should not update itself silently. Upgrade with `npx autologin-mcp@latest install`. Running `install` again is safe: it replaces its own entries and leaves your other settings alone.
+
+## `uninstall`
+
+Removes the MCP server, the skill, the hook and the deny rules.
+
+| Flag | Meaning |
+|---|---|
+| `-y`, `--yes` | Do not ask for confirmation |
+| `--dry-run` | Print the changes without applying them |
+| `--purge` | Also delete `~/.autologin-mcp`, including your credentials |
+
+## `add`
+
+Adds a profile. If a profile with the same name exists, it asks before replacing it. The password is asked with hidden input, twice.
+
+```bash
+npx autologin-mcp add                                   # asks for everything
+npx autologin-mcp add staging --url staging.example.com --username qa@example.com
+```
+
+## `list`
+
+Prints each profile's name, root URL and username, plus any problems. Passwords are never shown.
+
+## `remove <name>`
+
+Deletes a profile from the credentials file. `-y` skips the confirmation.
+
+## `edit`
+
+Opens the credentials file in `$VISUAL`, `$EDITOR`, or the operating system's default editor, creating it first if needed.
+
+## Running the server
+
+Without a command, `npx autologin-mcp` runs the MCP server on stdio. MCP clients start it this way; you do not need to run it yourself. The server stops when the client closes stdin, and releases its Chrome connection and bridge port.
+
+---
+
+<!-- https://olgaysezgin.github.io/autologin-mcp/security.html -->
+
+# Security model
+
+autologin-mcp has one job: an AI agent can log in to the app it is testing, but the password never enters the model's context. Everything below serves that goal.
+
+## What the agent can and cannot see
+
+| The agent sees | The agent never sees |
+|---|---|
+| Profile names, root URLs and usernames (`list_profiles`) | Passwords |
+| The login outcome (`success`, `failed` with the page's error message, ...) | The content of the credentials file |
+| The one-time loader script (a `127.0.0.1` URL, no credential) | The credentials response of the bridge |
+| After login: the app itself, including session cookies, as with any logged-in browser | |
+
+## Protections
+
+| Risk | What autologin-mcp does |
+|---|---|
+| The agent reads the credentials file with `Read`, `cat`, `grep` or a sub-agent | `install` adds a Claude Code **PreToolUse hook** that blocks every tool call touching `~/.autologin-mcp`: file tools by path, shell commands and other tools by text. Hooks also run in "skip permissions" mode. `Read`/`Edit` deny rules are a second layer. |
+| A password in a tool result or an error message | Every result passes through a redactor that removes each configured password and its URL-encoded form. The in-page filler scrubs the password from any error text it returns. |
+| A password in the environment | Values are parsed in memory and never copied into `process.env`. |
+| A malicious or prompt-injected page asks the agent to "log in here" | A profile only fills pages whose host matches its root URL. In CDP mode the host comes from Chrome itself; in bridge mode from the `Origin` header, which the browser sets and page scripts cannot change. |
+| Another program or page uses the bridge | The bridge listens on `127.0.0.1` only, on a random port. Each script carries a random 192-bit token, works once and expires after 60 seconds. A profile can be released at most 20 times in five minutes. |
+| The agent re-runs a used script | It receives the first run's outcome, not the credentials. |
+| A wrong password locks the account | After three failed logins in five minutes, the profile is paused (`rate_limited`). |
+| The password stays in the page after a failed attempt | The password field is cleared. |
+| A silent update of a tool that handles credentials | `install` pins the exact package version. |
+
+## Limits
+
+autologin-mcp prevents **accidental** exposure. It is not a sandbox against a deliberately hostile agent.
+
+- **The hook matches paths and text.** It stops accidental reads, not an agent that deliberately hides the path (for example by encoding it). It also blocks harmless `Bash` commands that merely mention the folder. `Read`/`Write`/`Edit` are only blocked for paths inside it.
+- **The credentials file is plaintext**, protected by file permissions (`600`). Other programs running as your user can read it.
+- **JavaScript in the page.** An agent that runs its own JavaScript in the tab could read the password field after it is filled, or modify the bridge script. The instructions tell the agent not to, but they cannot force it.
+- **Session cookies** are visible to an agent that controls the browser once you are logged in.
+- **Network inspection tools** could show the login request body.
+- **The guard hook is a Claude Code feature.** In other MCP clients, use the client's own permission rules to deny access to `~/.autologin-mcp`, if it has them.
+
+## Recommendations
+
+- **Use dedicated test accounts** with the least privileges your tests need. Never store a personal or production administrator password.
+- Run add, edit and remove in a normal terminal. Never paste a password into an AI chat.
+- Prefer a separate Chrome profile for agent testing: fewer extensions see the login, and your everyday sessions stay out of reach.
+- Keep the guard hook installed. Do not add allow rules for `~/.autologin-mcp`.
+
+## Reporting a vulnerability
+
+Please do not open a public issue. Use GitHub's private reporting: [Security → Report a vulnerability](https://github.com/olgaysezgin/autologin-mcp/security/advisories/new). See [SECURITY.md](https://github.com/olgaysezgin/autologin-mcp/blob/main/SECURITY.md) for the scope.
+
+---
+
+<!-- https://olgaysezgin.github.io/autologin-mcp/clients.html -->
+
+# Agents and browser tools
+
+autologin-mcp does not drive the browser for your tests. The agent keeps using the browser tool it already has; autologin-mcp only handles the login. Two things matter:
+
+1. **The agent** must be an MCP client, so it can call `login`.
+2. **The browser tool** must be able to run JavaScript in the tab (bridge mode), or the tab must live in a Chrome that autologin-mcp can reach over CDP (CDP mode).
+
+## Claude Code + Claude in Chrome
+
+This is the primary setup, tested end to end on real apps.
+
+- `npx autologin-mcp install` registers everything: MCP server, skill and guard hook.
+- In bridge mode the agent runs the `script` field with `javascript_tool`.
+- Some Chrome profiles have extensions (typically password managers) that take over the tab right after a login form is submitted. `javascript_tool` then fails with `Cannot access a chrome-extension:// URL of different extension` or `Detached while handling command`. The login still runs; the server's instructions tell the agent to call `login_status` to get the outcome.
+
+## Claude Code + Playwright MCP
+
+- Bridge mode: the agent passes the `function` field to `browser_evaluate`.
+- CDP mode with a shared browser: start Chrome with `--remote-debugging-port=9222`, run Playwright MCP with `--cdp-endpoint http://127.0.0.1:9222`, and set `AUTOLOGIN_CDP_URL=http://127.0.0.1:9222` in the credentials file. autologin-mcp then fills the tab Playwright MCP is testing.
+
+## Claude Code + chrome-devtools-mcp
+
+- Bridge mode: the agent passes the `function` field to `evaluate_script`.
+- CDP mode with a shared browser: run chrome-devtools-mcp with `--browserUrl http://127.0.0.1:9222` against the same Chrome as above.
+
+## Other MCP clients
+
+The server itself is a standard stdio MCP server, so other clients can start it. Register it with your client's MCP configuration, for example in the common `mcpServers` JSON format:
+
+```json
+{
+  "mcpServers": {
+    "autologin": { "command": "npx", "args": ["-y", "autologin-mcp@0.1.0"] }
+  }
+}
+```
+
+Then add profiles with `npx autologin-mcp add`. Keep in mind:
+
+- The `install` command, the skill and the guard hook are for Claude Code only. Other clients get the server's built-in instructions, but not the hook. Use your client's permission settings to keep the agent away from `~/.autologin-mcp`, if it has them.
+- Clients other than Claude Code are not tested yet. Installers for Codex CLI, Gemini CLI and Cursor are on the [roadmap](https://github.com/olgaysezgin/autologin-mcp#roadmap). Reports and pull requests are welcome.
+
+## Browsers
+
+- **Google Chrome** is supported and tested in both modes. Other Chromium-based browsers should work the same way.
+- **Bridge mode** only needs the agent's tool to run the loader script in the page. Chrome may ask once per public site to allow access to "apps and services on this device" (Local Network Access); allow it for your test sites. Other browser engines are not tested yet.
+- **CDP mode** needs Chrome with remote debugging: `chrome://inspect/#remote-debugging` (Chrome 144+) or `--remote-debugging-port`.
+
+---
+
+<!-- https://olgaysezgin.github.io/autologin-mcp/troubleshooting.html -->
+
+# Troubleshooting
+
+## The agent's JavaScript call fails right after the form is submitted
+
+Claude in Chrome reports `Cannot access a chrome-extension:// URL of different extension` or `Detached while handling command`.
+
+Another extension, typically a password manager offering to save the password, took over the tab. **The login itself still ran.** The agent should call `login_status` to get the outcome; the MCP server's instructions tell it to. Reload the tab if the browser tool keeps failing. A separate Chrome profile without password managers avoids the problem.
+
+## The agent ran the script twice
+
+That is fine. The second run returns the first run's outcome with the note "This one-time script already ran; this is the outcome of that run." The credentials are not released again.
+
+## `no_login_form`
+
+No visible password field was found within 5 seconds.
+
+- If the result has `previous_login` with `success` or `submitted`, the tab is already logged in. This usually means the agent called `login` again after its JavaScript call was cut off. Nothing to fix.
+- If the login form is inside an iframe, a shadow root or behind a "Log in" button, it is not supported yet. Open the form first, or see the roadmap.
+- If the form is unusual, set `<PROFILE>_PASSWORD_SELECTOR` (and the other selectors) for the profile. See [Configuration](configuration.md#profiles).
+
+## `failed` although the credentials are right
+
+- The heuristic may not find the right button. Set `<PROFILE>_SUBMIT_SELECTOR`.
+- The app keeps the form on the page after logging in. Set `<PROFILE>_SUCCESS_SELECTOR` to an element that only exists when logged in.
+- The app validates the password before sending it (for example a minimum length). The `hint` shows the page's message.
+
+## `rate_limited`
+
+Three logins for the profile failed within five minutes, so the profile is paused to protect the account from a lockout. Check the credentials with `npx autologin-mcp list` and fix them with `npx autologin-mcp edit`. The pause ends five minutes after the failures, or when the MCP server restarts.
+
+## `origin_mismatch`
+
+The tab's host does not match the profile's root URL. Check the port (`localhost:3000` does not match `localhost:5173`) and subdomains (`example.com` does not match `app.example.com`; use `*.example.com`). See [URL matching](configuration.md#url-matching).
+
+## The bridge script returns `error … Content-Security-Policy`
+
+The app's Content-Security-Policy blocks scripts from `127.0.0.1`. Turn on `chrome://inspect/#remote-debugging` so autologin-mcp uses CDP mode, which is not affected by CSP.
+
+## Chrome asks to allow access to "apps and services on this device"
+
+This is Chrome's Local Network Access prompt. It appears once per site when a public site (for example a staging server) loads the bridge from `127.0.0.1`. Allow it for your test sites.
+
+## `browser_not_connected`
+
+Only with `AUTOLOGIN_MODE=cdp`. Remote debugging is off, or Chrome's *Allow* prompt was dismissed. Enable `chrome://inspect/#remote-debugging` and retry, or set `AUTOLOGIN_CDP_URL` to a Chrome started with `--remote-debugging-port`.
+
+## `ambiguous_profile` or `ambiguous_tab`
+
+Several profiles or several tabs match. The agent should call `login` again with `profile`, or with the exact `url` of the tab.
+
+## A harmless shell command is blocked by the hook
+
+The guard hook blocks any `Bash` command that mentions the credentials folder, even `ls`. This is intentional. Edit the file yourself with `npx autologin-mcp edit`.
+
+## The agent does not call `login`
+
+- Restart Claude Code after `install`, and check that `claude mcp list` shows `autologin` as connected.
+- Tell the agent once: "When the app asks for a login, use the autologin tool."
+
+## A local `.tgz` build does not update
+
+`npx` caches packages by spec. After rebuilding a `.tgz` with the same name, clear the matching entry in `~/.npm/_npx` and run `install` again.
+
+---
+
+<!-- https://olgaysezgin.github.io/autologin-mcp/faq.html -->
+
+# Frequently asked questions
+
+## How do I let Claude Code log in to my web app without giving it my password?
+
+Install autologin-mcp (`npx autologin-mcp install`) and add a login profile for your app in a normal terminal (`npx autologin-mcp add`). When Claude Code's browser tab shows a login form, Claude calls the `login` tool, and autologin-mcp fills the form with the credentials stored on your machine. Claude only sees the outcome, never the password.
+
+## What happens when my session expires while an AI agent is testing my app?
+
+Without autologin-mcp the agent stops, or asks you for the password. With autologin-mcp it notices the login form, "session expired" message, 401/403 or redirect to a login page, calls `login`, and continues the task where it left off.
+
+## Does the password ever reach the AI model?
+
+No. The password goes from `~/.autologin-mcp/credentials.env` directly into the page, either over a one-time `127.0.0.1` bridge that checks the page's origin, or through the Chrome DevTools Protocol. Tool results are redacted, and a guard hook blocks the agent from reading the credentials file. The agent can see the username and, after login, the session cookies. See the [security model](security.md) for the limits.
+
+## Why not just put the password in the prompt or in a `.env` file in my project?
+
+Everything in the conversation, including files the agent reads, is sent to the model provider and can end up in transcripts, logs and context summaries. A project `.env` can also end up in git. autologin-mcp keeps credentials in one global file outside your projects that the agent is blocked from reading.
+
+## Which agents and browser tools does it work with?
+
+It is built and tested for Claude Code with Claude in Chrome. It also works with Playwright MCP (`browser_evaluate`) and chrome-devtools-mcp (`evaluate_script`). Other MCP clients can run the server, but the installer, skill and guard hook are Claude Code features today. See [Agents and browser tools](clients.md).
+
+## Do I need to enable Chrome remote debugging?
+
+No. The default bridge mode needs no browser setup. Remote debugging (`chrome://inspect/#remote-debugging`, Chrome 144+) enables CDP mode, which is useful when the app's Content-Security-Policy blocks the bridge.
+
+## Can a malicious web page trick the agent into sending my credentials to it?
+
+A profile only fills pages whose host matches its root URL. In bridge mode, the check uses the `Origin` header that the browser sets and page scripts cannot fake; in CDP mode, the tab's URL comes from Chrome. A page on another site receives nothing, even if a prompt injection tells the agent to log in there.
+
+## Does it support SSO, OAuth, two-factor authentication or multi-step logins?
+
+Not yet. It handles the common username + password form on the app's own page, including React, Vue and Angular forms. Multi-step logins (username, then password), iframes, SSO login hosts and TOTP codes are on the [roadmap](https://github.com/olgaysezgin/autologin-mcp#roadmap).
+
+## Can I use several accounts for the same app?
+
+Yes. Add one profile per account with the same root URL, for example `admin` and `viewer`. The agent picks one by name, or you tell it which one to use.
+
+## Is it safe to use with production accounts?
+
+Use dedicated test accounts. autologin-mcp prevents accidental exposure of the password, but an agent that controls the browser can use the logged-in session, and the credentials file is plaintext protected by file permissions.
+
+## Does it work on Windows, macOS and Linux?
+
+macOS and Linux are tested in continuous integration. Windows is supported in the code (Chrome profile paths, editor launch) but not tested yet.
+
+## Is it free?
+
+Yes. autologin-mcp is open source under the MIT license.
+
+## How is autologin-mcp different from a password manager?
+
+A password manager fills forms for you, in your browser. autologin-mcp fills forms for an AI agent, at the moment the agent asks, and tells the agent only whether it worked. It is built for automated testing sessions, not for your personal accounts.
