@@ -58,7 +58,8 @@ export async function launchChrome(): Promise<TestChrome> {
       const exited = new Promise((resolve) => proc.once('exit', resolve));
       proc.kill();
       await exited;
-      await fs.rm(userDataDir, { recursive: true, force: true });
+      // Chrome's helper processes can still write to the profile briefly after the main process exits.
+      await fs.rm(userDataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     },
   };
 }
