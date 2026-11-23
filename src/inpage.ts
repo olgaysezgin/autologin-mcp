@@ -171,19 +171,37 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
       const loginField = (el: HTMLInputElement): boolean =>
         (el.getAttribute('autocomplete') ?? '').toLowerCase().split(/\s+/).includes('username') ||
         [el.name, el.id].some((word) => LOGIN_FIELD.test(word));
-      // A button that means "continue" and not, say, "Subscribe" or "Invite".
-      const continueButton = (scope: ParentNode): Element | null =>
-        Array.from(scope.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]')).find(
-          (el) => visible(el) && !(el as HTMLButtonElement).disabled && (NEXT_TEXT.test(label(el)) || IDENTIFIER_TEXT.test(label(el))),
+      // Controls a person types into or picks from. Hidden fields, checkboxes and buttons do not count.
+      const NOT_TYPED = ['hidden', 'checkbox', 'radio', 'submit', 'button', 'image', 'reset'];
+      const typedControls = (controls: Element[]): number =>
+        controls.filter(
+          (el) =>
+            (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) &&
+            visible(el) &&
+            !el.disabled &&
+            !(el instanceof HTMLInputElement && NOT_TYPED.includes(el.type)),
+        ).length;
+      const BUTTONS = 'button, [role="button"], input[type="button"], input[type="submit"]';
+      // A button after the field that means "continue", and not, say, "Subscribe" or "Invite".
+      const continueButton = (buttons: Element[], field: HTMLInputElement): Element | null =>
+        buttons.find(
+          (el) => visible(el) && !(el as HTMLButtonElement).disabled && precedes(field, el) && (NEXT_TEXT.test(label(el)) || IDENTIFIER_TEXT.test(label(el))),
         ) ?? null;
-      // The field and its button belong together: the field's form, or else the closest container that holds
-      // a continue button and no other text field (so a form-less newsletter field never borrows a login button).
+      // A username step is a form, or a small container, whose only typed field is the username: not a signup,
+      // checkout or invite form with more fields, and never a button far away (a header "Sign in" next to a
+      // footer newsletter field).
       const buttonFor = (field: HTMLInputElement): Element | null => {
         if (selectors.submit) return find(selectors.submit);
-        if (field.form) return continueButton(field.form);
-        for (let node = field.parentElement; node !== null && node !== document.documentElement; node = node.parentElement) {
-          if (Array.from(node.querySelectorAll('input')).filter(textLike).length > 1) return null;
-          const button = continueButton(node);
+        const form = field.form;
+        if (form !== null) {
+          // form.elements also holds controls outside the element that point at it with form="…".
+          if (typedControls(Array.from(form.elements)) !== 1) return null;
+          return continueButton([...Array.from(form.querySelectorAll(BUTTONS)), ...Array.from(form.elements)], field);
+        }
+        let node = field.parentElement;
+        for (let depth = 0; depth < 3 && node !== null && node !== document.documentElement; depth += 1, node = node.parentElement) {
+          if (typedControls(Array.from(node.querySelectorAll('input, textarea, select'))) !== 1) return null;
+          const button = continueButton(Array.from(node.querySelectorAll(BUTTONS)), field);
           if (button !== null) return button;
         }
         return null;

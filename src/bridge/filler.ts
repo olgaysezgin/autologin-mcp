@@ -29,12 +29,7 @@ export interface BridgeResult {
  * self-contained: it only uses its arguments (`inpage` is autologinInpage) and browser globals.
  * The password never leaves the page: results are scrubbed before they are returned.
  */
-export async function bridgeLogin(
-  inpage: typeof autologinInpage,
-  creds: BridgeCredentials,
-  timing: BridgeTiming,
-  options: { identifierStep?: boolean } = {},
-): Promise<BridgeResult> {
+export async function bridgeLogin(inpage: typeof autologinInpage, creds: BridgeCredentials, timing: BridgeTiming): Promise<BridgeResult> {
   const ATTR = 'data-autologin-mcp';
   const scrub = (text: string): string => text.split(creds.password).join('[REDACTED]');
   const finish = (status: BridgeStatus, extra: { reason?: string; hint?: string } = {}): BridgeResult => ({ status, url: location.href, ...extra });
@@ -53,14 +48,12 @@ export async function bridgeLogin(
     const NAVIGATED_HINT =
       'Only the username was sent: the page navigated after the username step. Call login again on the next page; if it asks for single sign-on, a passkey or a code, a human has to finish.';
     const settleMs = Math.min(timing.detectTimeoutMs, Math.max(4 * timing.pollMs, timing.detectTimeoutMs / 2));
-    // Off right after a login that went through: the page is then most likely the logged-in app.
-    const identifierStep = options.identifierStep ?? true;
     let identifierSince: number | null = null;
     let detected = inpage('detect', { selectors: creds.selectors }) as DetectResult;
     for (;;) {
       if (detected.found || detected.error) break;
       const now = Date.now();
-      if (identifierStep && detected.step === 'identifier') {
+      if (detected.step === 'identifier') {
         identifierSince ??= now;
         if (detected.nextButton && now - identifierSince >= settleMs) break;
       } else {
@@ -71,7 +64,7 @@ export async function bridgeLogin(
       detected = inpage('detect', { selectors: creds.selectors }) as DetectResult;
     }
     if (!detected.found) {
-      if (!identifierStep || detected.step !== 'identifier' || !detected.hasUsername) {
+      if (detected.step !== 'identifier' || !detected.hasUsername) {
         return finish('no_login_form', { hint: detected.error ?? 'No visible password field was found on the page.' });
       }
       // Identifier-first login: send the username, then wait for the password step.
@@ -181,7 +174,7 @@ export const REUSED_NOTE = 'This one-time script already ran; this is the outcom
  * A re-run of a used script gets the first run's outcome instead of credentials.
  * `noForm` is merged into a `no_login_form` outcome, typically "the previous login already went through".
  */
-export function fillerScript(base: string, token: string, timing: BridgeTiming, noForm: NoFormContext | null = null, identifierStep = true): string {
+export function fillerScript(base: string, token: string, timing: BridgeTiming, noForm: NoFormContext | null = null): string {
   return [
     '(() => {',
     `const inpage = ${autologinInpage.toString()};`,
@@ -193,7 +186,7 @@ export function fillerScript(base: string, token: string, timing: BridgeTiming, 
     "const done = (detail) => window.dispatchEvent(new CustomEvent('autologin-mcp:' + token, { detail }));",
     "const report = (result) => { fetch(base + '/v1/result/' + token, { method: 'POST', body: JSON.stringify(result), keepalive: true }).catch(() => {}); return result; };",
     "fetch(base + '/v1/credentials/' + token, { method: 'POST' })",
-    `  .then(async (res) => { const body = await res.json(); if (res.ok) return report(explain(await login(inpage, body, ${JSON.stringify(timing)}, ${JSON.stringify({ identifierStep })}))); return body.result ? Object.assign({}, body.result, { note: ${JSON.stringify(REUSED_NOTE)} }) : body; })`,
+    `  .then(async (res) => { const body = await res.json(); if (res.ok) return report(explain(await login(inpage, body, ${JSON.stringify(timing)}))); return body.result ? Object.assign({}, body.result, { note: ${JSON.stringify(REUSED_NOTE)} }) : body; })`,
     "  .then(done, (error) => done({ status: 'error', url: location.href, hint: 'autologin-mcp bridge: ' + (error && error.message ? error.message : String(error)) }));",
     '})();',
   ].join('\n');

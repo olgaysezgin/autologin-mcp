@@ -84,6 +84,32 @@ describe('detect', () => {
     expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false });
   });
 
+  it('takes only a form or container whose one text field is the username', () => {
+    // A signup or checkout step: an email field among other fields, with Continue.
+    document.body.innerHTML = `<form><input name="fullname"><input type="email" name="email"><input name="company"><button>Continue</button></form>`;
+    expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false });
+    document.body.innerHTML = `<form><input type="email" name="email"><select name="plan"><option>Pro</option></select><button>Next</button></form>`;
+    expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false });
+    // Checkboxes and hidden fields do not count.
+    document.body.innerHTML = `<form><input type="hidden" name="csrf" value="x"><input type="email" name="email"><input type="checkbox" name="remember"><button>Next</button></form>`;
+    expect(detect()).toMatchObject({ step: 'identifier' });
+  });
+
+  it('never pairs a field with a button that comes before it or far above it', () => {
+    // A footer newsletter field and a header Sign in button.
+    document.body.innerHTML = `<header><button>Sign in</button></header><main><p>News</p></main><footer><div><input type="email" name="email"></div></footer>`;
+    expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false });
+    document.body.innerHTML = `<div><div><div><div><input name="username"></div></div></div><button>Next</button></div>`;
+    expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false });
+  });
+
+  it('pairs a field with a button of its form that sits outside the form element', () => {
+    document.body.innerHTML = `<form id="f"><input name="username" id="u"></form><footer><button form="f" id="go">Next</button></footer>`;
+    expect(detect()).toMatchObject({ step: 'identifier', nextButton: true });
+    expect(roleOf('#u')).toBe('username');
+    expect(roleOf('#go')).toBe('submit');
+  });
+
   it('does not mistake a newsletter form for an identifier-first login', () => {
     document.body.innerHTML = `<form><input type="email" name="email"><button type="submit">Subscribe</button></form>`;
     expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false });

@@ -100,17 +100,9 @@ describe('BridgeServer', () => {
     const plain = new BridgeServer();
     const p = urls(await plain.issue(profile));
     expect((await request(p.filler, { origin: ORIGIN })).text).toContain('const noForm = null;');
-    expect((await request(p.filler, { origin: ORIGIN })).text).toContain('{"identifierStep":true}');
     await plain.close();
   });
 
-  it('turns the identifier-first path off right after a login of the profile went through', async () => {
-    const recentlyLoggedIn = vi.fn(() => true);
-    server = new BridgeServer({ recentlyLoggedIn });
-    const { filler } = urls(await server.issue(profile));
-    expect((await request(filler, { origin: ORIGIN })).text).toContain('{"identifierStep":false}');
-    expect(recentlyLoggedIn).toHaveBeenCalledWith('app');
-  });
 
   it('releases credentials once, to the right origin, over POST', async () => {
     server = new BridgeServer({ reuseWaitMs: 50 });

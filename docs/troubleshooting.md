@@ -38,10 +38,10 @@ An identifier-first login (email, then password, on the same page) is filled in 
 Before it sends the username alone, autologin-mcp makes sure the page really is a username step, so a normal form whose password field renders a little late is still filled in one go:
 
 - The field must say it is a login identifier: `autocomplete="username"`, or a name or id such as `username`, `email`, `login`, `loginfmt` or `identifier`. An email field alone (an invite or newsletter field) is not enough.
-- The field and its button must belong together: the same form, or the same container with no other text field in it.
+- The field must be the only field to type into in its form, or in a small container around it (up to three levels), and the button must come after it there. A signup, checkout or invite form with more fields is left alone, and so is a footer newsletter field next to a header "Sign in" button.
 - With a **Next** or **Continue** button, the username step has to stay on the page for half the detect time (2.5 seconds).
 - With a **Log in** or **Sign in** button, autologin-mcp first waits the whole detect time (5 seconds) for a password field.
-- Within five minutes of a login of the profile that went through, the username step is skipped: the page is then most likely the logged-in app.
+- A form with nothing but an email field named `email` and a **Next** button looks exactly like a username step. The agent only calls `login` on login pages, but on such a form in a logged-in app the username would be sent.
 
 What the results mean:
 

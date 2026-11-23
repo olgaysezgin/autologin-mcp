@@ -62,16 +62,6 @@ export class ResultLog {
     return wentThrough(previous) ? { previous_login: previous, hint: alreadyLoggedInHint(previous) } : { previous_login: previous };
   }
 
-  /**
-   * True when the profile's latest real login outcome went through within RECENT_MS. Then a page without a
-   * password field is most likely the logged-in app, and an email field + Next button on it (an invite, a
-   * search) must not be taken for the username step of a login.
-   */
-  recentlyLoggedIn(profile: string): boolean {
-    const previous = this.recent(profile);
-    return previous !== null && wentThrough(previous);
-  }
-
   /** The profile's latest real login outcome (not an earlier `no_login_form`) when it is recent. */
   private recent(profile: string): PreviousLogin | null {
     const latest = this.latest.get(profile);

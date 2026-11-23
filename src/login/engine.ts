@@ -68,14 +68,6 @@ export const DEFAULT_TIMING: LoginTiming = { detectTimeoutMs: 5_000, verifyTimeo
 export const identifierSettleMs = (timing: { detectTimeoutMs: number; pollMs: number }): number =>
   Math.min(timing.detectTimeoutMs, Math.max(4 * timing.pollMs, timing.detectTimeoutMs / 2));
 
-export interface LoginOptions {
-  /**
-   * Allow the identifier-first path (username, then password). Off right after a login that went through:
-   * a page without a password field is then most likely the logged-in app, not a username step.
-   */
-  identifierStep?: boolean;
-}
-
 export const PASSWORD_STEP_HINT =
   'The page did not ask for a password after the username step. It may use single sign-on, a passkey or a second factor, so a human has to finish this login.';
 
@@ -99,12 +91,21 @@ async function attempt<T>(fn: () => Promise<T>): Promise<T | null> {
   }
 }
 
-async function typeInto(page: PageLike, role: FieldRole, value: string): Promise<void> {
+/** Types into a tagged field; `beforeInsert` runs between focusing it and typing (the site check). */
+async function typeInto(page: PageLike, role: FieldRole, value: string, beforeInsert: () => void): Promise<void> {
   await page.run('clear', { role });
   const field = await page.element(selectorFor(role));
   if (field === null) throw new Error(`The ${role} field disappeared before it could be filled.`);
   await field.focus();
+  beforeInsert();
   await page.insertText(value);
+}
+
+/** Thrown when the tab left the profile's site right before something would be typed. */
+class LeftSiteError extends Error {
+  constructor(readonly result: LoginResult) {
+    super(result.hint);
+  }
 }
 
 async function submitForm(page: PageLike, hasSubmit: boolean): Promise<void> {
@@ -129,12 +130,11 @@ export async function performLogin(
   profile: UsableProfile,
   timing: LoginTiming = DEFAULT_TIMING,
   clock: Clock = realClock,
-  options: LoginOptions = {},
 ): Promise<LoginResult> {
   const base = { profile: profile.name };
-  const identifierStep = options.identifierStep ?? true;
   // The tab can leave the profile's site while we wait (a redirect, or the username step sending it to a
-  // single sign-on host). Nothing is typed into a page of another site.
+  // single sign-on host). Nothing is typed into a page of another site: the site is checked before each
+  // step and again right between focusing a field and typing into it.
   const leftSite = (): LoginResult | null => {
     const url = page.url();
     if (matchesUrl(profile.root, url)) return null;
@@ -143,8 +143,14 @@ export async function performLogin(
       ...base,
       url,
       reason: 'left_profile_site',
-      hint: `The login moved to ${hostOf(url)}, which is not part of profile "${profile.name}" (${profile.url}), so nothing was typed there. This is usually single sign-on, which a human has to finish.`,
+      hint:
+        `The login moved to ${hostOf(url)}, which is not part of profile "${profile.name}" (${profile.url}), so nothing was typed there. ` +
+        'If it is single sign-on, a human has to finish this login. If that site belongs to the app, give the profile a root URL that covers it (for example *.example.com).',
     };
+  };
+  const onSite = (): void => {
+    const away = leftSite();
+    if (away !== null) throw new LeftSiteError(away);
   };
   const detect = () => attempt(() => page.run<DetectResult>('detect', { selectors: profile.selectors }));
   const state = () => attempt(() => page.run<StateResult>('state', { successSelector: profile.selectors.success }));
@@ -161,7 +167,7 @@ export async function performLogin(
     for (;;) {
       if (detected?.found || detected?.error) break;
       const now = clock.now();
-      if (identifierStep && detected?.step === 'identifier') {
+      if (detected?.step === 'identifier') {
         identifierSince ??= now;
         if (detected.nextButton && now - identifierSince >= settleMs) break;
       } else {
@@ -172,20 +178,20 @@ export async function performLogin(
       detected = await detect();
     }
     if (!detected?.found) {
-      if (!identifierStep || detected?.step !== 'identifier' || !detected.hasUsername) {
+      if (detected?.step !== 'identifier' || !detected.hasUsername) {
         return { status: 'no_login_form', ...base, url: page.url(), hint: detected?.error ?? 'No visible password field was found on the page.' };
       }
       // Identifier-first login: send the username, then wait for the page to ask for the password.
       // A message already on the page (say "Your session has expired") is not an answer to the username.
-      const away = leftSite();
-      if (away !== null) return away;
+      onSite();
       const beforeStep = await state();
       await page.bringToFront().catch(() => undefined);
-      await typeInto(page, 'username', profile.username);
+      await typeInto(page, 'username', profile.username, onSite);
       await submitForm(page, detected.hasSubmit);
       const stepStart = clock.now();
       let next = await detect();
       while (!next?.found) {
+        onSite(); // a message on a single sign-on host is not a rejection of the username
         const current = await state();
         const newError = current?.errorText != null && current.errorText !== beforeStep?.errorText;
         if (newError && clock.now() - stepStart >= timing.earlyFailAfterMs) {
@@ -202,12 +208,11 @@ export async function performLogin(
       detected = next;
     }
 
-    const away = leftSite();
-    if (away !== null) return away;
+    onSite();
     const before = await state();
     await page.bringToFront().catch(() => undefined);
-    if (detected.hasUsername) await typeInto(page, 'username', profile.username);
-    await typeInto(page, 'password', profile.password);
+    if (detected.hasUsername) await typeInto(page, 'username', profile.username, onSite);
+    await typeInto(page, 'password', profile.password, onSite);
     await submitForm(page, detected.hasSubmit);
 
     const submittedAt = clock.now();
@@ -239,6 +244,7 @@ export async function performLogin(
       hint: last?.errorText ?? 'Still on the login form after submitting. Check the credentials, or set selectors for this profile.',
     };
   } catch (error) {
+    if (error instanceof LeftSiteError) return error.result;
     await clearPassword();
     return { status: 'error', ...base, url: page.url(), hint: error instanceof Error ? error.message : String(error) };
   }

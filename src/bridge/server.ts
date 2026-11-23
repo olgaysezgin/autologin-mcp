@@ -26,8 +26,6 @@ export interface BridgeOptions {
   now?: () => number;
   /** Called once per ticket with the outcome reported by the page (used for rate limiting). */
   onResult?: (profile: string, result: BridgeResult) => void;
-  /** True right after a login of this profile went through: the page then skips the identifier-first path (ResultLog.recentlyLoggedIn). */
-  recentlyLoggedIn?: (profile: string) => boolean;
   /** Added to a `no_login_form` outcome in the page, e.g. "the previous login went through" (see ResultLog.noFormContext). */
   noFormContext?: (profile: string) => NoFormContext | null;
   /** Credential releases allowed per profile per 5 minutes (a guard against runaway loops; failures are limited separately). */
@@ -143,7 +141,7 @@ export class BridgeServer {
 
     if (kind === 'filler') {
       const script = allowed
-        ? fillerScript(base, token, this.timing, this.options.noFormContext?.(profile.name) ?? null, !(this.options.recentlyLoggedIn?.(profile.name) ?? false))
+        ? fillerScript(base, token, this.timing, this.options.noFormContext?.(profile.name) ?? null)
         : `window.dispatchEvent(new CustomEvent(${JSON.stringify(`autologin-mcp:${token}`)}, { detail: ${JSON.stringify(mismatch)} }));`;
       return send(200, script, 'text/javascript');
     }

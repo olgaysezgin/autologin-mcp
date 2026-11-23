@@ -25,6 +25,7 @@ class FakePage implements PageLike {
   insertError: unknown = null;
   currentUrl = 'https://app.test/login';
   onSubmit: (() => void) | null = null;
+  onFocus: ((role: string) => void) | null = null;
 
   constructor(
     private readonly detects: Array<Step<DetectResult>>,
@@ -55,6 +56,7 @@ class FakePage implements PageLike {
     return {
       focus: async () => {
         this.calls.push(`focus:${role}`);
+        this.onFocus?.(role);
       },
       click: async () => {
         if (this.clickError) throw this.clickError;
@@ -274,6 +276,22 @@ describe('performLogin', () => {
       expect(page.typed).toEqual(['qa']);
     });
 
+    it('reports a message on the other site as left_profile_site, not as a rejected username', async () => {
+      const page = new FakePage([...repeat(next, 5), next], [onForm(), onForm('Enter your password for Contoso')]);
+      page.onSubmit = () => (page.currentUrl = 'https://login.idp.test/');
+      expect(await performLogin(page, profile, timing, fakeClock())).toMatchObject({ status: 'needs_human', reason: 'left_profile_site' });
+    });
+
+    it('checks the site again between focusing the password field and typing', async () => {
+      const page = new FakePage([FOUND], [onForm(), loggedIn]);
+      page.onFocus = (role) => {
+        if (role === 'password') page.currentUrl = 'https://login.idp.test/';
+      };
+      expect(await performLogin(page, profile, timing, fakeClock())).toMatchObject({ status: 'needs_human', reason: 'left_profile_site', url: 'https://login.idp.test/' });
+      expect(page.typed).toEqual(['qa']);
+      expect(page.calls).not.toContain('click:submit');
+    });
+
     it('types nothing when the tab is on another site before it starts', async () => {
       const page = new FakePage([...repeat(next, 5)], [onForm()]);
       page.currentUrl = 'https://elsewhere.test/login';
@@ -282,14 +300,6 @@ describe('performLogin', () => {
       onePage.currentUrl = 'https://elsewhere.test/login';
       expect(await performLogin(onePage, profile, timing, fakeClock())).toMatchObject({ status: 'needs_human', reason: 'left_profile_site' });
       expect([...page.typed, ...onePage.typed]).toEqual([]);
-    });
-
-    it('skips the username step right after a login that went through', async () => {
-      const page = new FakePage([...repeat(next, 5)], [onForm()]);
-      expect(await performLogin(page, profile, timing, fakeClock(), { identifierStep: false })).toMatchObject({ status: 'no_login_form' });
-      expect(page.typed).toEqual([]);
-      const onePage = new FakePage([FOUND], [onForm(), loggedIn]);
-      expect((await performLogin(onePage, profile, timing, fakeClock(), { identifierStep: false })).status).toBe('success');
     });
 
     it('hands the login to a human, without a failure, when no password step follows', async () => {

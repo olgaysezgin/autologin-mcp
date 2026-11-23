@@ -188,14 +188,6 @@ describe('bridgeLogin', () => {
       });
     });
 
-    it('skips the username step right after a login that went through', async () => {
-      document.body.innerHTML = `<form><input id="mail" type="email"><button id="next" type="button">Next</button></form>`;
-      const clicked = vi.fn();
-      document.querySelector('#next')!.addEventListener('click', clicked);
-      expect(await bridgeLogin(autologinInpage, CREDS, TIMING, { identifierStep: false })).toMatchObject({ status: 'no_login_form' });
-      expect(clicked).not.toHaveBeenCalled();
-      expect(document.querySelector<HTMLInputElement>('#mail')!.value).toBe('');
-    });
 
     it('presses Enter in the username field when its button is gone by the time it submits', async () => {
       document.body.innerHTML = `<div id="step1"><input id="mail" type="email"><div role="button" id="next">Next</div></div>`;
