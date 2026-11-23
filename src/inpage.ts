@@ -122,8 +122,8 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
     };
     const errorText = findError();
     // A field for a one-time code (an authenticator app, SMS or email code): a second factor.
-    const CODE_FIELD =
-      /^(otp|totp|mfa|2fa|code|one[-_]?time[-_]?(code|password)|verification[-_]?code|security[-_]?code|auth(entication)?[-_]?code|sms[-_]?code|(otp|totp|mfa)[-_]?code)$/i;
+    // Only clear names: a bare "code" or "securityCode" is as likely a promo code or a card's CVV after login.
+    const CODE_FIELD = /^(otp|totp|one[-_]?time[-_]?(code|password)|verification[-_]?code|(otp|totp|mfa|2fa|two[-_]?factor)[-_]?code)$/i;
     const codeVisible = Array.from(document.querySelectorAll('input')).some(
       (el) =>
         usable(el) &&
@@ -239,12 +239,25 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
       const CAPTCHA_FRAME = /\/recaptcha\/(api2|enterprise)\/(anchor|bframe)|hcaptcha\.com\/captcha|challenges\.cloudflare\.com/i;
       const SSO_TEXT =
         /^((sign|log) ?in|login|continue|sign up) (with|using|via) (google|microsoft|apple|github|gitlab|okta|azure( ad)?|facebook|linkedin|slack|saml|sso|single sign-on|your (company|organi[sz]ation)( account)?)$|^(single sign-on|sso|use sso|enterprise sso)$|^(google|microsoft|apple|github|sso) ile (giri[sş] yap|oturum a[cç]|devam et)$/i;
-      const PASSKEY_TEXT = /passkey|security key|ge[cç]i[sş] anahtar|g[uü]venlik anahtar|(sign in with|use) (face id|touch id|windows hello)/i;
+      // Sign-in actions only: "Add a passkey" in a logged-in app's settings is not a login.
+      const PASSKEY_TEXT =
+        /^((sign|log) ?in|login|continue) with (a |your )?(passkey|security key|face id|touch id|windows hello)$|^use (a |your )?(passkey|security key|face id|touch id|windows hello)$|^(ge[cç]i[sş] anahtar[ıi]|passkey) ile (giri[sş] yap|oturum a[cç])$/i;
+      // A page that also offers email, a username or a password still leads to a form: open it and log in again.
+      const FORM_PATH = /^((sign|log) ?in|login|continue|sign up) with (email|e-mail|username|(a |your )?password)$|^use (a |your )?(password|email|username)( instead)?$|^(e-?posta|şifre|parola) ile/i;
       const captcha =
         Array.from(document.querySelectorAll('iframe')).some((frame) => visible(frame) && CAPTCHA_FRAME.test(frame.src) && !/[?&]size=invisible/.test(frame.src)) ||
         visible(document.querySelector('#challenge-form, #challenge-stage, #cf-challenge-running'));
       const actions = Array.from(document.querySelectorAll(`${BUTTONS}, a`)).filter(visible).map(label);
-      const blocker = captcha ? 'captcha' : actions.some((t) => SSO_TEXT.test(t)) ? 'sso' : actions.some((t) => PASSKEY_TEXT.test(t)) ? 'passkey' : null;
+      const formPath = actions.some((t) => FORM_PATH.test(t));
+      const blocker = captcha
+        ? 'captcha'
+        : formPath
+          ? null
+          : actions.some((t) => SSO_TEXT.test(t))
+            ? 'sso'
+            : actions.some((t) => PASSKEY_TEXT.test(t))
+              ? 'passkey'
+              : null;
       return blocker === null ? { found: false, hasUsername: false, hasSubmit: false } : { found: false, hasUsername: false, hasSubmit: false, blocker };
     }
     password = el as HTMLInputElement;

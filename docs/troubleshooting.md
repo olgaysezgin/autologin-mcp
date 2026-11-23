@@ -55,7 +55,7 @@ What the results mean:
 
 The page wants something only a person can do, and autologin-mcp stopped without retrying. The `reason` says what:
 
-- `sso`: the tab is on a single sign-on provider (Google, Microsoft, Okta, ...), or the login page offers only "Sign in with ..." buttons. Sign in yourself; autologin-mcp fills only the app's own username and password form.
+- `sso`: the tab is on a single sign-on provider (Google, Microsoft, Okta, ...), or the login page offers only "Sign in with ..." buttons. Sign in yourself; autologin-mcp fills only the app's own username and password form. A page that also offers "Continue with email" or a password is not reported: open that form and let the agent call `login` again.
 - `passkey`: the page asks for a passkey or a security key, which needs your device.
 - `captcha`: a captcha stands before the login. Solve it, then let the agent call `login` again if the form appears.
 - `mfa_required`: the password was accepted and the page asks for a one-time code. Filling TOTP codes is planned ([#1](https://github.com/olgaysezgin/autologin-mcp/issues/1)).

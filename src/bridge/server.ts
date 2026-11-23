@@ -5,7 +5,7 @@ import { FailureLimiter } from '../ratelimit.js';
 import type { NoFormContext } from '../results.js';
 import { matchesUrl } from '../store/match.js';
 import type { UsableProfile } from '../store/profiles.js';
-import { agentExpression, agentFunction, agentScript, fillerScript, type BridgeResult, type BridgeTiming } from './filler.js';
+import { agentExpression, agentFunction, agentScript, fillerScript, REUSED_NOTE, type BridgeResult, type BridgeTiming } from './filler.js';
 
 export const BRIDGE_TIMING: BridgeTiming = { detectTimeoutMs: 5_000, verifyTimeoutMs: 10_000, pollMs: 250, earlyFailAfterMs: 1_500 };
 
@@ -37,10 +37,14 @@ export interface BridgeOptions {
 interface Ticket {
   profile: UsableProfile;
   expiresAt: number;
+  /** The filler was served: the script ran (or started to). A second run only gets the first run's outcome. */
+  started: boolean;
   released: boolean;
   result: BridgeResult | null;
   waiters: Array<(result: BridgeResult | null) => void>;
 }
+
+const REUSED_UNKNOWN = { status: 'expired', hint: 'This login script was already used and its outcome is unknown; call login_status, or login again.' };
 
 const TOKEN_PATH = /^\/v1\/(filler|credentials|result)\/([A-Za-z0-9_-]{16,})(?:\.js)?$/;
 const MAX_BODY = 8_192;
@@ -100,7 +104,7 @@ export class BridgeServer {
     const now = this.now();
     for (const [token, ticket] of this.tickets) if (ticket.expiresAt <= now) this.tickets.delete(token);
     const token = randomBytes(24).toString('base64url');
-    this.tickets.set(token, { profile, expiresAt: now + this.ttlMs, released: false, result: null, waiters: [] });
+    this.tickets.set(token, { profile, expiresAt: now + this.ttlMs, started: false, released: false, result: null, waiters: [] });
     const fn = agentFunction(base, token);
     return { profile: profile.name, expiresInSeconds: Math.round(this.ttlMs / 1000), function: fn, script: agentScript(fn), expression: agentExpression(fn) };
   }
@@ -140,12 +144,19 @@ export class BridgeServer {
     };
 
     if (kind === 'filler') {
-      const script = allowed
-        ? fillerScript(base, token, this.timing, this.options.noFormContext?.(profile.name) ?? null, {
-            selectors: { username: profile.selectors.username, password: profile.selectors.password, submit: profile.selectors.submit },
-            successSelector: profile.selectors.success,
-          })
-        : `window.dispatchEvent(new CustomEvent(${JSON.stringify(`autologin-mcp:${token}`)}, { detail: ${JSON.stringify(mismatch)} }));`;
+      const answer = (detail: unknown): string => `window.dispatchEvent(new CustomEvent(${JSON.stringify(`autologin-mcp:${token}`)}, { detail: ${JSON.stringify(detail)} }));`;
+      if (!allowed) return send(200, answer(mismatch), 'text/javascript');
+      // One run per script, also when the first run found no form and never asked for the credentials:
+      // a re-run (a browser tool retrying after losing the tab) only gets the first run's outcome.
+      if (ticket.started) {
+        const first = await this.firstRunResult(ticket);
+        return send(200, answer(first === null ? REUSED_UNKNOWN : { ...first, note: REUSED_NOTE }), 'text/javascript');
+      }
+      ticket.started = true;
+      const script = fillerScript(base, token, this.timing, this.options.noFormContext?.(profile.name) ?? null, {
+        selectors: { username: profile.selectors.username, password: profile.selectors.password, submit: profile.selectors.submit },
+        successSelector: profile.selectors.success,
+      });
       return send(200, script, 'text/javascript');
     }
 
@@ -156,9 +167,7 @@ export class BridgeServer {
       if (ticket.released) {
         // A browser tool may re-run the script (e.g. after losing the tab mid-call): answer with the first run's outcome.
         const first = await this.firstRunResult(ticket);
-        return first === null
-          ? send(410, { status: 'expired', hint: 'This login script was already used and its outcome is unknown; call login_status, or login again.' })
-          : send(409, { status: 'already_used', result: first });
+        return first === null ? send(410, REUSED_UNKNOWN) : send(409, { status: 'already_used', result: first });
       }
       if (this.releases.isBlocked(profile.name)) {
         return send(429, { status: 'rate_limited', hint: 'Too many logins for this profile in the last 5 minutes.' });

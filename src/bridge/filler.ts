@@ -95,9 +95,11 @@ export async function bridgeLogin(
       // Identifier-first login: send the username, then wait for the password step.
       // A message already on the page (say "Your session has expired") is not an answer to the username.
       const beforeStep = inpage('state', { successSelector: creds.successSelector }) as StateResult;
+      const { username } = await credentials();
+      // The page may have re-rendered while the credentials were on their way: tag the step again.
+      inpage('detect', { selectors: creds.selectors });
       const stepField = document.querySelector<HTMLInputElement>(`[${ATTR}="username"]`)!;
       window.addEventListener('beforeunload', onLeave, { once: true });
-      const { username } = await credentials();
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(stepField, username);
       stepField.dispatchEvent(new Event('input', { bubbles: true }));
       stepField.dispatchEvent(new Event('change', { bubbles: true }));
@@ -143,6 +145,10 @@ export async function bridgeLogin(
       field.dispatchEvent(new Event('change', { bubbles: true }));
     };
     const { username, password } = await credentials();
+    // The page may have re-rendered while the credentials were on their way: tag the form again.
+    const again = inpage('detect', { selectors: creds.selectors }) as DetectResult;
+    if (!again.found) return finish('no_login_form', { hint: 'The login form went away while the credentials were on their way; nothing was typed.' });
+    detected = again;
     if (detected.hasUsername) fill('username', username);
     fill('password', password);
 

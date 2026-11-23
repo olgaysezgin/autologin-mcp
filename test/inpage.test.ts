@@ -338,13 +338,44 @@ describe('pages a person has to finish (#2)', () => {
   });
 
   it('reports a one-time-code field in the state', () => {
-    for (const markup of ['<input autocomplete="one-time-code">', '<input name="otp">', '<input id="verification_code">', '<input name="totp">', '<input name="code">']) {
+    for (const markup of ['<input autocomplete="one-time-code">', '<input name="otp">', '<input id="verification_code">', '<input name="totp">']) {
       document.body.innerHTML = markup;
       expect(state()).toEqual({ ready: true, passwordVisible: false, success: false, errorText: null, codeVisible: true });
     }
     for (const markup of ['<input name="promo_code">', '<input name="zipcode">', '<input autocomplete="one-time-code" style="display:none">']) {
       document.body.innerHTML = markup;
       expect(state()).toEqual({ ready: true, passwordVisible: false, success: false, errorText: null });
+    }
+  });
+});
+
+describe('pages a person has to finish: no false alarms (#2 review)', () => {
+  it('does not take a passkey settings link on a logged-in page for a passkey login', () => {
+    for (const markup of ['<nav><a href="/settings">Security: add a passkey</a></nav><p>Dashboard</p>', '<p>Welcome</p><button>Create a passkey</button>']) {
+      document.body.innerHTML = markup;
+      expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false });
+    }
+    document.body.innerHTML = '<main><button>Use a passkey</button></main>';
+    expect(detect()).toMatchObject({ blocker: 'passkey' });
+  });
+
+  it('does not take a sign-in chooser that also offers email or a password for single sign-on', () => {
+    for (const other of ['Continue with email', 'Sign in with email', 'Use a password', 'Log in with username']) {
+      document.body.innerHTML = `<main><button>Continue with Google</button><button>${other}</button></main>`;
+      expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false });
+    }
+    document.body.innerHTML = '<main><button>Use a passkey</button><a href="#">Use your password instead</a></main>';
+    expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false });
+  });
+
+  it('only takes clear one-time-code fields for a second factor', () => {
+    for (const markup of ['<input name="code">', '<input id="securityCode">', '<input name="promo_code">', '<input name="security_code">']) {
+      document.body.innerHTML = markup;
+      expect(state()).toEqual({ ready: true, passwordVisible: false, success: false, errorText: null });
+    }
+    for (const markup of ['<input name="otp">', '<input id="totp_code">', '<input name="mfaCode">', '<input name="one_time_code">', '<input autocomplete="one-time-code" name="c">']) {
+      document.body.innerHTML = markup;
+      expect(state()).toMatchObject({ codeVisible: true });
     }
   });
 });

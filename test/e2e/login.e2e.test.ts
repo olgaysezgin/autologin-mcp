@@ -258,6 +258,18 @@ describe('bridge mode in a real Chrome (autologin-mcp has no CDP access)', () =>
     expect(app.received.at(-1)).toEqual(VALID);
   });
 
+  it('runs a script once: after a run that found no form, a re-run types nothing (#2 review)', async () => {
+    const before = app.received.length;
+    const tab = await open('dashboard.html');
+    const fn = (await bridge.issue(profile())).function;
+    expect(await tab.evaluate(`(${fn})()`)).toMatchObject({ status: 'no_login_form' });
+    await tab.goto(`${app.origin}/controlled.html`);
+    expect(await tab.evaluate(`(${fn})()`)).toMatchObject({ status: 'no_login_form', note: expect.stringContaining('already ran') });
+    expect(await tab.$eval('#user', (el) => (el as HTMLInputElement).value)).toBe('');
+    expect(app.received.length).toBe(before);
+    await tab.close();
+  });
+
   it('reports a username step that leads to another site as the username only, and sends no password', async () => {
     const other = await startFixtureServer();
     try {

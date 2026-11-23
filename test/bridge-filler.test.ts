@@ -343,3 +343,36 @@ describe('bridgeLogin: credentials only when there is a form to fill (#2)', () =
     expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
   });
 });
+
+describe('bridgeLogin: fields re-rendered while the credentials arrive (#2 review)', () => {
+  it('types nothing when the form went away meanwhile', async () => {
+    app(() => undefined);
+    const creds = {
+      selectors: {},
+      load: vi.fn(async () => {
+        document.querySelector('#login')!.remove();
+        return { username: CREDS.username, password: CREDS.password };
+      }),
+    };
+    expect(await bridgeLogin(autologinInpage, creds, TIMING)).toMatchObject({ status: 'no_login_form', hint: expect.stringContaining('nothing was typed') });
+  });
+
+  it('tags the form again after the credentials came back', async () => {
+    let received: unknown = null;
+    const mount = () =>
+      app((state) => {
+        received = { ...state };
+        document.querySelector('#login')!.remove();
+      });
+    mount();
+    const creds = {
+      selectors: {},
+      load: vi.fn(async () => {
+        mount(); // React re-renders the form while the page waits for the credentials
+        return { username: CREDS.username, password: CREDS.password };
+      }),
+    };
+    expect(await bridgeLogin(autologinInpage, creds, TIMING)).toEqual({ status: 'success', url: location.href });
+    expect(received).toEqual({ username: CREDS.username, password: CREDS.password });
+  });
+});

@@ -210,3 +210,27 @@ describe('BridgeServer', () => {
     await server.close();
   });
 });
+
+describe('BridgeServer: one run per script, even when the first run found no form (#2 review)', () => {
+  it('serves the filler once; a re-run gets the first run outcome without touching the page', async () => {
+    server = new BridgeServer({ reuseWaitMs: 50 });
+    const t = urls(await server.issue(profile));
+    expect((await request(t.filler, { origin: ORIGIN })).text).toContain('const login = ');
+    await request(t.result, { method: 'POST', body: JSON.stringify({ status: 'no_login_form', url: `${ORIGIN}/` }) });
+    const rerun = (await request(t.filler, { origin: ORIGIN })).text;
+    expect(rerun).not.toContain('const login = ');
+    expect(rerun).toContain('"status":"no_login_form"');
+    expect(rerun).toContain('This one-time script already ran');
+    // The credentials were never released, and a re-run cannot get them either.
+    expect((await request(t.credentials, { method: 'POST', origin: ORIGIN })).status).toBe(200);
+  });
+
+  it('answers expired when the first run never reported', async () => {
+    server = new BridgeServer({ reuseWaitMs: 20 });
+    const t = urls(await server.issue(profile));
+    await request(t.filler, { origin: ORIGIN });
+    const rerun = (await request(t.filler, { origin: ORIGIN })).text;
+    expect(rerun).toContain('"status":"expired"');
+    expect(rerun).not.toContain('const login = ');
+  });
+});
