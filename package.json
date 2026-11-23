@@ -1,7 +1,7 @@
 {
   "name": "autologin-mcp",
   "version": "1.3.0",
-  "description": "Auto-login MCP server for AI coding agents (Claude Code, Claude in Chrome, Playwright MCP, chrome-devtools-mcp). Logs your agent into the app under test; credentials stay on your machine and never reach the model.",
+  "description": "Auto-login MCP server for AI coding agents (Claude Code, Codex, Cursor, Gemini CLI) and their browser tools (Claude in Chrome, Playwright MCP, chrome-devtools-mcp, Puppeteer). Logs your agent into the app under test; credentials stay on your machine and never reach the model.",
   "type": "module",
   "bin": {
     "autologin-mcp": "dist/bin.js"

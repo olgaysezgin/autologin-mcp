@@ -7,12 +7,13 @@ Key facts:
 - Install: `npx autologin-mcp install` registers the MCP server, a skill and a guard hook in Claude Code. Then run `npx autologin-mcp add` in a normal terminal (not in the AI chat) to add a login profile: name, root URL, username, hidden password.
 - Credentials live in one global file, `~/.autologin-mcp/credentials.env` (permissions 600), outside every project.
 - MCP tools: `list_profiles`, `login`, `login_status`, `open_config`.
-- Bridge mode (default, no browser setup): `login` returns a one-time script with a 60-second `127.0.0.1` URL; the agent runs it in the tab with its JavaScript tool (Claude in Chrome `javascript_tool`, Playwright MCP `browser_evaluate`, chrome-devtools-mcp `evaluate_script`). The page receives the credentials only if its browser-set Origin header matches the profile.
-- CDP mode (automatic when Chrome remote debugging is on): autologin-mcp fills the tab itself over the Chrome DevTools Protocol.
-- Results: `success`, `submitted`, `failed` (with the page's error message), `no_login_form`, `rate_limited` and others. If the agent's JavaScript call is cut off, `login_status` returns the outcome.
-- Works with Claude Code + Claude in Chrome (tested), Playwright MCP, chrome-devtools-mcp; other MCP clients can run the stdio server.
-- Identifier-first logins (username, then the password field on the same page) are supported.
-- Not supported yet: SSO login hosts, two-factor/TOTP codes, logins that navigate to a second document, iframes.
+- Bridge mode (default, no browser setup): `login` returns a one-time script with a 60-second `127.0.0.1` URL, as `script` (Claude in Chrome `javascript_tool`), `function` (Playwright MCP `browser_evaluate`, chrome-devtools-mcp `evaluate_script`) or `expression` (Puppeteer `page.evaluate`). The page looks for the login form first and asks for the credentials only right before typing; they are released only if its browser-set Origin header matches the profile. Each script runs once.
+- CDP mode (automatic when Chrome remote debugging is on): autologin-mcp fills the tab itself over the Chrome DevTools Protocol, and never types into a page of another site.
+- Results: `success`, `submitted`, `failed` (with the page's error message), `no_login_form`, `rate_limited`, and `needs_human` with a reason when only a person can finish: `sso` (single sign-on), `passkey`, `captcha`, `mfa_required` (a one-time code after the password), `password_step_timeout`, `left_profile_site`. `needs_human` does not count toward the rate limit. If the agent's JavaScript call is cut off, `login_status` returns the outcome.
+- Identifier-first logins (username, then the password field on the same page) are filled in two steps.
+- Works with Claude Code + Claude in Chrome (tested), Playwright MCP, chrome-devtools-mcp and Puppeteer. `npx autologin-mcp print-config --client <codex|gemini|cursor|vscode|claude-desktop|hermes>` prints the setup for other agents.
+- Scripts and CI: `printf '%s' "$PASSWORD" | npx autologin-mcp add <name> --url <root> --username <user> --password-stdin -y` adds a profile without prompts.
+- Not filled (handed to a person instead): single sign-on, passkeys, captchas and one-time codes. Filling TOTP codes, logins that navigate to a second document, and iframes are on the roadmap.
 - Requirements: Node.js 22.12+. License: MIT. Author: Olgay Sezgin.
 
 ## Documentation
@@ -21,10 +22,10 @@ Key facts:
 - [Getting started](https://olgaysezgin.github.io/autologin-mcp/getting-started.html): install, add a profile, first automatic login, uninstall
 - [How it works](https://olgaysezgin.github.io/autologin-mcp/how-it-works.html): bridge and CDP modes, form detection, outcome detection
 - [Configuration](https://olgaysezgin.github.io/autologin-mcp/configuration.html): credentials file, profile keys, URL matching, selectors, modes
-- [MCP tools](https://olgaysezgin.github.io/autologin-mcp/mcp-tools.html): tool arguments and every result status
-- [CLI reference](https://olgaysezgin.github.io/autologin-mcp/cli.html): install, uninstall, add, list, remove, edit
+- [MCP tools](https://olgaysezgin.github.io/autologin-mcp/mcp-tools.html): tool arguments and every result status, including needs_human reasons
+- [CLI reference](https://olgaysezgin.github.io/autologin-mcp/cli.html): install, uninstall, add (also with --password-stdin), list, remove, edit, print-config
 - [Security model](https://olgaysezgin.github.io/autologin-mcp/security.html): protections, threat model and limits
-- [Agents and browser tools](https://olgaysezgin.github.io/autologin-mcp/clients.html): Claude in Chrome, Playwright MCP, chrome-devtools-mcp, other MCP clients
+- [Agents and browser tools](https://olgaysezgin.github.io/autologin-mcp/clients.html): Claude in Chrome, Playwright MCP, chrome-devtools-mcp, Puppeteer; Codex CLI, Gemini CLI, Cursor, VS Code, Claude Desktop, Hermes Agent
 - [Troubleshooting](https://olgaysezgin.github.io/autologin-mcp/troubleshooting.html): common errors and fixes
 - [FAQ](https://olgaysezgin.github.io/autologin-mcp/faq.html): frequently asked questions
 

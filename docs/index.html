@@ -99,7 +99,9 @@
           "Rate limiting that prevents account lockouts",
           "Several accounts per app",
           "print-config for Codex CLI, Gemini CLI, Cursor, VS Code, Claude Desktop and Hermes Agent",
-          "Profiles from scripts and CI with add --password-stdin"
+          "Profiles from scripts and CI with add --password-stdin",
+          "Identifier-first logins: the email first, then the password on the same page",
+          "Hands single sign-on, passkeys, captchas and one-time codes to a person (needs_human) without releasing the credentials"
         ],
         "sameAs": [
           "https://github.com/olgaysezgin/autologin-mcp",
@@ -328,8 +330,8 @@
             <ol class="steps">
               <li data-reveal class="active"><button type="button" aria-expanded="true" aria-controls="shot-1"><span class="num">01</span>The agent calls login</button><div class="body"><p>When the tab under test shows a login form, a 401/403, a login redirect or a "session expired" message, the agent calls the <code>login</code> tool with the tab's URL. autologin-mcp picks the matching profile.</p></div><span class="bar"></span></li>
               <li data-reveal><button type="button" aria-expanded="false" aria-controls="shot-2"><span class="num">02</span>It gets a one-time script</button><div class="body"><p>The result holds a small loader script that contains only a one-time URL on 127.0.0.1. It expires after 60 seconds and never contains a credential.</p></div><span class="bar"></span></li>
-              <li data-reveal><button type="button" aria-expanded="false" aria-controls="shot-3"><span class="num">03</span>The page fetches the credentials</button><div class="body"><p>The agent runs the script in the tab. The local bridge releases the credentials only if the browser-set <code>Origin</code> header matches the profile's site, so a page on another site gets nothing.</p></div><span class="bar"></span></li>
-              <li data-reveal><button type="button" aria-expanded="false" aria-controls="shot-4"><span class="num">04</span>The form is filled and submitted</button><div class="body"><p>autologin-mcp fills the fields the way React, Vue and Angular forms expect, submits, and returns <code>success</code>, or <code>failed</code> with the page's own error message. Then the agent continues the task.</p></div><span class="bar"></span></li>
+              <li data-reveal><button type="button" aria-expanded="false" aria-controls="shot-3"><span class="num">03</span>The page fetches the credentials</button><div class="body"><p>The agent runs the script in the tab. The page looks for the login form first, and only then asks the local bridge for the credentials, which it releases only if the browser-set <code>Origin</code> header matches the profile's site. A page on another site, or one without a login form, gets nothing.</p></div><span class="bar"></span></li>
+              <li data-reveal><button type="button" aria-expanded="false" aria-controls="shot-4"><span class="num">04</span>The form is filled and submitted</button><div class="body"><p>autologin-mcp fills the fields the way React, Vue and Angular forms expect, submits, and returns <code>success</code>, or <code>failed</code> with the page's own error message. Single sign-on, passkeys, captchas and one-time codes are handed to you as <code>needs_human</code>. Then the agent continues the task.</p></div><span class="bar"></span></li>
             </ol>
           </div>
           <div class="panel" data-reveal>
@@ -344,7 +346,8 @@
   <span class="t-key">"profile"</span>: <span class="t-str">"staging"</span>,
   <span class="t-key">"expires_in_s"</span>: 60,
   <span class="t-key">"script"</span>: <span class="t-str">"await (async () =&gt; …)()"</span>,
-  <span class="t-key">"function"</span>: <span class="t-str">"async () =&gt; …"</span>
+  <span class="t-key">"function"</span>: <span class="t-str">"async () =&gt; …"</span>,
+  <span class="t-key">"expression"</span>: <span class="t-str">"(async () =&gt; …)()"</span>
 }
 
 <span class="t-dim"># No username, no password: only a one-time
@@ -355,16 +358,21 @@
 <span class="t-key">Origin</span>: https://phishing.example.net
 <span style="color:var(--red)">✗ no matching profile: nothing released</span>
 
-<span class="t-dim"># Browsers set the Origin header themselves.
-# Page scripts cannot fake it.</span></pre>
+<span class="t-dim"># Asked only once the page found a login form.
+# Browsers set the Origin header themselves;
+# page scripts cannot fake it.</span></pre>
 <pre class="shot" id="shot-4"><span class="cap">Result returned to the agent</span>{ <span class="t-key">"status"</span>: <span class="t-ok">"success"</span>,
   <span class="t-key">"url"</span>: <span class="t-str">"https://staging.example.com/checkout"</span> }
 
 { <span class="t-key">"status"</span>: <span style="color:var(--red)">"failed"</span>,
   <span class="t-key">"hint"</span>: <span class="t-str">"Invalid email or password"</span> }
 
+{ <span class="t-key">"status"</span>: <span class="t-str">"needs_human"</span>,
+  <span class="t-key">"reason"</span>: <span class="t-str">"mfa_required"</span> }
+
 <span class="t-dim"># Three failed logins in five minutes pause the
-# profile, so a wrong password cannot lock the account.</span></pre>
+# profile, so a wrong password cannot lock the account.
+# needs_human (SSO, passkey, captcha, a code) goes to you.</span></pre>
           </div>
         </div>
         <p data-reveal class="cdp-note">With Chrome remote debugging turned on, autologin-mcp fills the tab itself over the Chrome DevTools Protocol (CDP), and the agent runs nothing. <a href="how-it-works.html">Bridge mode and CDP mode in detail</a></p>
@@ -435,7 +443,7 @@
         <div class="dots" data-reveal="title"><h2 class="display">Built so the model never sees the password</h2></div>
         <p data-reveal class="lead-mono">autologin-mcp keeps secrets out of the model context by design, and says plainly what it does not protect against.</p>
         <div class="sec">
-          <article data-reveal><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6l8-3z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg></span><h3>Origin-checked bridge</h3><p>Credentials go only to pages whose browser-set Origin belongs to the profile. A prompt-injected page on another site gets nothing.</p></article>
+          <article data-reveal><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6l8-3z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg></span><h3>Origin-checked bridge</h3><p>Credentials go only to pages whose browser-set Origin belongs to the profile, and only once a login form is found. A prompt-injected page on another site gets nothing.</p></article>
           <article data-reveal><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg></span><h3>One-time, loopback only</h3><p>The bridge listens on 127.0.0.1. Each script carries a random token, works once and expires in 60 seconds.</p></article>
           <article data-reveal><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span><h3>Guard hook</h3><p>A Claude Code PreToolUse hook and deny rules block the agent from reading the credentials folder, also in skip-permissions mode.</p></article>
           <article data-reveal><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.7 10.7 0 0 1 12 5c5.5 0 9 5 10 7-.5 1-1.5 2.6-3 4M6.6 6.6C4.4 8 3 10.3 2 12c1 2 4.5 7 10 7 1.7 0 3.2-.5 4.5-1.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg></span><h3>Redacted results</h3><p>Every tool result and error is scrubbed of each password. Failed attempts clear the password field.</p></article>
