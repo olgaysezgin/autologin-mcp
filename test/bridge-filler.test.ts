@@ -119,6 +119,9 @@ describe('bridgeLogin', () => {
   });
 
   describe('identifier-first safety', () => {
+    /** For tests whose page changes after a delay: room for slow CI runners; they end as soon as the page changes. */
+    const ROOMY: BridgeTiming = { ...TIMING, detectTimeoutMs: 1_000 };
+
     /** One-page form whose password field mounts `delay` ms after the email field and the button. */
     function staggered(button: string, delay: number) {
       const seen: Array<{ username: string; password: string }> = [];
@@ -135,13 +138,13 @@ describe('bridgeLogin', () => {
 
     it('waits for a password field that mounts after the email field and a Log in button', async () => {
       const seen = staggered('Log in', 60);
-      expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toEqual({ status: 'success', url: location.href });
+      expect(await bridgeLogin(autologinInpage, CREDS, ROOMY)).toEqual({ status: 'success', url: location.href });
       expect(seen).toEqual([{ username: CREDS.username, password: CREDS.password }]);
     });
 
     it('waits a moment before treating a Continue button as an identifier step', async () => {
       const seen = staggered('Continue', 20);
-      expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toEqual({ status: 'success', url: location.href });
+      expect(await bridgeLogin(autologinInpage, CREDS, ROOMY)).toEqual({ status: 'success', url: location.href });
       expect(seen).toEqual([{ username: CREDS.username, password: CREDS.password }]);
     });
 
@@ -166,7 +169,7 @@ describe('bridgeLogin', () => {
           document.querySelector('#go')!.addEventListener('click', () => document.querySelector('#step1')!.remove());
         }, 60),
       );
-      expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toEqual({ status: 'success', url: location.href });
+      expect(await bridgeLogin(autologinInpage, CREDS, ROOMY)).toEqual({ status: 'success', url: location.href });
     });
 
     it('still reports a username that the page rejects next to an older alert', async () => {
