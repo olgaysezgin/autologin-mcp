@@ -304,3 +304,47 @@ describe('submit', () => {
     expect(autologinInpage('submit', {})).toBe('none');
   });
 });
+
+describe('pages a person has to finish (#2)', () => {
+  it('reports single sign-on, passkey and captcha pages that have no password field', () => {
+    document.body.innerHTML = `<main><h1>Welcome back</h1><button>Sign in with Google</button><a href="#">Continue with Microsoft</a></main>`;
+    expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false, blocker: 'sso' });
+    document.body.innerHTML = `<main><a href="/sso">Sign in with SSO</a></main>`;
+    expect(detect()).toMatchObject({ blocker: 'sso' });
+    document.body.innerHTML = `<main><button>Sign in with a passkey</button></main>`;
+    expect(detect()).toMatchObject({ blocker: 'passkey' });
+    document.body.innerHTML = `<main><button>Use a security key</button></main>`;
+    expect(detect()).toMatchObject({ blocker: 'passkey' });
+    document.body.innerHTML = `<main><iframe src="https://www.google.com/recaptcha/api2/anchor?k=x&size=normal"></iframe></main>`;
+    expect(detect()).toMatchObject({ blocker: 'captcha' });
+    document.body.innerHTML = `<main><iframe src="https://newassets.hcaptcha.com/captcha/v1/abc/static/hcaptcha.html#frame=checkbox"></iframe></main>`;
+    expect(detect()).toMatchObject({ blocker: 'captcha' });
+    document.body.innerHTML = `<div id="challenge-form"><p>Checking your browser</p></div>`;
+    expect(detect()).toMatchObject({ blocker: 'captcha' });
+  });
+
+  it('ignores those signs when the page has a form to fill, or when they are hidden or invisible', () => {
+    document.body.innerHTML = `
+      <form><input type="email" name="email"><input type="password"><button>Sign in</button></form>
+      <button>Sign in with Google</button><button>Sign in with a passkey</button>
+      <iframe src="https://www.google.com/recaptcha/api2/anchor?k=x&size=normal"></iframe>`;
+    expect(detect()).toEqual({ found: true, hasUsername: true, hasSubmit: true });
+    document.body.innerHTML = `<form><input name="username"><button>Next</button></form><button>Sign in with Google</button>`;
+    expect(detect()).toEqual({ found: false, hasUsername: true, hasSubmit: true, step: 'identifier', nextButton: true });
+    document.body.innerHTML = `<p>Dashboard</p><iframe src="https://www.google.com/recaptcha/api2/anchor?k=x&size=invisible"></iframe>`;
+    expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false });
+    document.body.innerHTML = `<p>Dashboard</p><button style="display:none">Sign in with Google</button><p>Read more about Google sign-in</p>`;
+    expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false });
+  });
+
+  it('reports a one-time-code field in the state', () => {
+    for (const markup of ['<input autocomplete="one-time-code">', '<input name="otp">', '<input id="verification_code">', '<input name="totp">', '<input name="code">']) {
+      document.body.innerHTML = markup;
+      expect(state()).toEqual({ ready: true, passwordVisible: false, success: false, errorText: null, codeVisible: true });
+    }
+    for (const markup of ['<input name="promo_code">', '<input name="zipcode">', '<input autocomplete="one-time-code" style="display:none">']) {
+      document.body.innerHTML = markup;
+      expect(state()).toEqual({ ready: true, passwordVisible: false, success: false, errorText: null });
+    }
+  });
+});

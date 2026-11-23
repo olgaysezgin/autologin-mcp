@@ -318,3 +318,29 @@ describe('performLogin', () => {
     sleep.mockRestore();
   });
 });
+
+describe('pages a person has to finish (#2)', () => {
+  const sso: DetectResult = { found: false, hasUsername: false, hasSubmit: false, blocker: 'sso' };
+  const code: StateResult = { ready: true, passwordVisible: false, success: false, errorText: null, codeVisible: true };
+
+  it('hands a single sign-on, passkey or captcha page to a human after the detect time, typing nothing', async () => {
+    for (const blocker of ['sso', 'passkey', 'captcha'] as const) {
+      const page = new FakePage([{ ...sso, blocker }], [onForm()]);
+      const clock = fakeClock();
+      expect(await performLogin(page, profile, timing, clock)).toMatchObject({ status: 'needs_human', reason: blocker, hint: expect.any(String) });
+      expect(clock.t).toBeGreaterThanOrEqual(timing.detectTimeoutMs);
+      expect(page.typed).toEqual([]);
+    }
+  });
+
+  it('still fills a form that renders after the blocker signs', async () => {
+    const page = new FakePage([sso, sso, FOUND], [onForm(), loggedIn]);
+    expect((await performLogin(page, profile, timing, fakeClock())).status).toBe('success');
+  });
+
+  it('reports a one-time-code step after the password as mfa_required, not as success', async () => {
+    const page = new FakePage([FOUND], [onForm(), code]);
+    expect(await performLogin(page, profile, timing, fakeClock())).toMatchObject({ status: 'needs_human', reason: 'mfa_required', hint: expect.stringContaining('one-time code') });
+    expect(page.typed).toEqual(['qa', 'pw']);
+  });
+});

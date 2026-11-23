@@ -51,6 +51,18 @@ What the results mean:
 - `failed` with `reason: identifier_rejected`: the page showed a new message after the username, for example "No account for this email"; the `hint` has it. Messages that were already on the page before, such as "Your session has expired", are ignored.
 - If the continue button has unusual text, the username step also has a picker (a language or country code), or its button sits far from the field, set `<PROFILE>_SUBMIT_SELECTOR`: with an explicit button the one-field rule is skipped.
 
+## `needs_human`
+
+The page wants something only a person can do, and autologin-mcp stopped without retrying. The `reason` says what:
+
+- `sso`: the tab is on a single sign-on provider (Google, Microsoft, Okta, ...), or the login page offers only "Sign in with ..." buttons. Sign in yourself; autologin-mcp fills only the app's own username and password form.
+- `passkey`: the page asks for a passkey or a security key, which needs your device.
+- `captcha`: a captcha stands before the login. Solve it, then let the agent call `login` again if the form appears.
+- `mfa_required`: the password was accepted and the page asks for a one-time code. Filling TOTP codes is planned ([#1](https://github.com/olgaysezgin/autologin-mcp/issues/1)).
+- `password_step_timeout`, `left_profile_site`: see the identifier-first section above.
+
+Pages are classified only after the usual detect time (5 seconds), so a login form that renders late is still filled. In bridge mode the credentials are not even requested for these pages.
+
 ## `failed` although the credentials are right
 
 - The heuristic may not find the right button. Set `<PROFILE>_SUBMIT_SELECTOR`.

@@ -152,7 +152,7 @@ No. It goes from the local credentials file straight into the page, through the 
 No. Bridge mode needs no browser setup. Remote debugging enables CDP mode, which also works when the app's Content-Security-Policy blocks the bridge.
 
 **Does it support SSO, 2FA or multi-step logins?**
-It handles username + password forms on the app's own page, including identifier-first logins that ask for the email and then swap in the password field. Logins that move to another document, iframes, SSO hosts and TOTP are on the roadmap.
+It fills username + password forms on the app's own page, including identifier-first logins that ask for the email and then swap in the password field. Single sign-on, passkeys, captchas and a one-time code after the password are recognised and handed to you (`needs_human`) instead of failing or retrying. Filling TOTP codes, logins that move to another document, and iframes are on the roadmap.
 
 **Is it free?**
 Yes, MIT licensed.

@@ -8,6 +8,17 @@ export interface BridgeCredentials {
   successSelector?: string;
 }
 
+/**
+ * What the page knows before any credential is released: the profile's selectors, and how to ask for the
+ * credentials. bridgeLogin asks only when it is about to type into a form it found, so a page without one
+ * (or one a person has to finish: SSO, passkey, captcha) never receives them.
+ */
+export interface LazyBridgeCredentials {
+  selectors: InpageSelectors;
+  successSelector?: string;
+  load(): Promise<{ username: string; password: string }>;
+}
+
 export interface BridgeTiming {
   detectTimeoutMs: number;
   verifyTimeoutMs: number;
@@ -29,9 +40,22 @@ export interface BridgeResult {
  * self-contained: it only uses its arguments (`inpage` is autologinInpage) and browser globals.
  * The password never leaves the page: results are scrubbed before they are returned.
  */
-export async function bridgeLogin(inpage: typeof autologinInpage, creds: BridgeCredentials, timing: BridgeTiming): Promise<BridgeResult> {
+export async function bridgeLogin(
+  inpage: typeof autologinInpage,
+  creds: BridgeCredentials | LazyBridgeCredentials,
+  timing: BridgeTiming,
+): Promise<BridgeResult> {
   const ATTR = 'data-autologin-mcp';
-  const scrub = (text: string): string => text.split(creds.password).join('[REDACTED]');
+  let secret: { username: string; password: string } | null = 'password' in creds ? { username: creds.username, password: creds.password } : null;
+  const credentials = async (): Promise<{ username: string; password: string }> => (secret ??= await (creds as LazyBridgeCredentials).load());
+  const scrub = (text: string): string => (secret === null ? text : text.split(secret.password).join('[REDACTED]'));
+  // Same words as NEEDS_HUMAN_HINTS in src/login/engine.ts (this function runs in the page and cannot import).
+  const NEEDS_HUMAN_HINTS = {
+    sso: "This page signs in through single sign-on (another provider), so a human has to finish this login. autologin-mcp only fills the app's own username and password form.",
+    passkey: "This page asks for a passkey or security key, which needs the user's device, so a human has to finish this login.",
+    captcha: 'This page shows a captcha. A human has to solve it; autologin-mcp does not.',
+    mfa_required: 'The page now asks for a one-time code (a second factor) after the password, so a human has to enter it.',
+  };
   const finish = (status: BridgeStatus, extra: { reason?: string; hint?: string } = {}): BridgeResult => ({ status, url: location.href, ...extra });
   const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
   let leaving = false;
@@ -65,6 +89,7 @@ export async function bridgeLogin(inpage: typeof autologinInpage, creds: BridgeC
     }
     if (!detected.found) {
       if (detected.step !== 'identifier' || !detected.hasUsername) {
+        if (detected.blocker) return finish('needs_human', { reason: detected.blocker, hint: NEEDS_HUMAN_HINTS[detected.blocker] });
         return finish('no_login_form', { hint: detected.error ?? 'No visible password field was found on the page.' });
       }
       // Identifier-first login: send the username, then wait for the password step.
@@ -72,7 +97,8 @@ export async function bridgeLogin(inpage: typeof autologinInpage, creds: BridgeC
       const beforeStep = inpage('state', { successSelector: creds.successSelector }) as StateResult;
       const stepField = document.querySelector<HTMLInputElement>(`[${ATTR}="username"]`)!;
       window.addEventListener('beforeunload', onLeave, { once: true });
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(stepField, creds.username);
+      const { username } = await credentials();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(stepField, username);
       stepField.dispatchEvent(new Event('input', { bubbles: true }));
       stepField.dispatchEvent(new Event('change', { bubbles: true }));
       if ((inpage('submit', {}) as SubmitResult) === 'none') {
@@ -116,8 +142,9 @@ export async function bridgeLogin(inpage: typeof autologinInpage, creds: BridgeC
       field.dispatchEvent(new Event('input', { bubbles: true }));
       field.dispatchEvent(new Event('change', { bubbles: true }));
     };
-    if (detected.hasUsername) fill('username', creds.username);
-    fill('password', creds.password);
+    const { username, password } = await credentials();
+    if (detected.hasUsername) fill('username', username);
+    fill('password', password);
 
     window.addEventListener('beforeunload', onLeave, { once: true });
     if ((inpage('submit', {}) as SubmitResult) === 'none') {
@@ -144,6 +171,7 @@ export async function bridgeLogin(inpage: typeof autologinInpage, creds: BridgeC
       const current = inpage('state', { successSelector: creds.successSelector }) as StateResult;
       last = current;
       if (current.success) return finish('success');
+      if (current.codeVisible && !current.passwordVisible) return finish('needs_human', { reason: 'mfa_required', hint: NEEDS_HUMAN_HINTS.mfa_required });
       if (!current.passwordVisible) {
         goneStreak += 1;
         if (goneStreak >= 2) return finish('success');
@@ -174,7 +202,13 @@ export const REUSED_NOTE = 'This one-time script already ran; this is the outcom
  * A re-run of a used script gets the first run's outcome instead of credentials.
  * `noForm` is merged into a `no_login_form` outcome, typically "the previous login already went through".
  */
-export function fillerScript(base: string, token: string, timing: BridgeTiming, noForm: NoFormContext | null = null): string {
+export function fillerScript(
+  base: string,
+  token: string,
+  timing: BridgeTiming,
+  noForm: NoFormContext | null = null,
+  hints: { selectors: InpageSelectors; successSelector?: string } = { selectors: {} },
+): string {
   return [
     '(() => {',
     `const inpage = ${autologinInpage.toString()};`,
@@ -185,8 +219,16 @@ export function fillerScript(base: string, token: string, timing: BridgeTiming, 
     "const explain = (result) => (noForm !== null && result.status === 'no_login_form' ? Object.assign({}, result, noForm) : result);",
     "const done = (detail) => window.dispatchEvent(new CustomEvent('autologin-mcp:' + token, { detail }));",
     "const report = (result) => { fetch(base + '/v1/result/' + token, { method: 'POST', body: JSON.stringify(result), keepalive: true }).catch(() => {}); return result; };",
-    "fetch(base + '/v1/credentials/' + token, { method: 'POST' })",
-    `  .then(async (res) => { const body = await res.json(); if (res.ok) return report(explain(await login(inpage, body, ${JSON.stringify(timing)}))); return body.result ? Object.assign({}, body.result, { note: ${JSON.stringify(REUSED_NOTE)} }) : body; })`,
+    // The credentials are fetched only when the page is about to type them (see LazyBridgeCredentials).
+    'let refused = null;',
+    "const load = () => fetch(base + '/v1/credentials/' + token, { method: 'POST' }).then(async (res) => {",
+    '  const body = await res.json();',
+    '  if (res.ok) return { username: body.username, password: body.password };',
+    `  refused = body.result ? Object.assign({}, body.result, { note: ${JSON.stringify(REUSED_NOTE)} }) : body;`,
+    "  throw new Error(refused.hint || refused.status || 'credentials refused');",
+    '});',
+    `login(inpage, Object.assign(${JSON.stringify(hints)}, { load }), ${JSON.stringify(timing)})`,
+    '  .then((result) => (refused !== null ? refused : report(explain(result))))',
     "  .then(done, (error) => done({ status: 'error', url: location.href, hint: 'autologin-mcp bridge: ' + (error && error.message ? error.message : String(error)) }));",
     '})();',
   ].join('\n');

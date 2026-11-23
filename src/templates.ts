@@ -38,7 +38,7 @@ The \`autologin\` MCP server fills the login form for you and only tells you the
 3. \`success\`: continue the task where you left off. \`submitted\`: the page navigated; take a look to confirm you are logged in.
 4. \`failed\`: tell the user the \`hint\`; do not retry more than once.
    \`no_login_form\`: the page has no login form. If it carries \`previous_login\` with \`success\` or \`submitted\`, your earlier login went through: continue the task.
-   \`needs_human\`: the page wants something only a person can do (single sign-on, a passkey, a second factor). Tell the user the \`hint\` and wait; do not retry.
+   \`needs_human\`: the page wants something only a person can do (single sign-on, a passkey, a captcha, a second factor). Tell the user the \`hint\` and wait; do not retry.
 5. \`no_profile\` / \`origin_mismatch\`: ask the user to run \`npx autologin-mcp add\` in a separate terminal (never in this chat), or call \`mcp__autologin__open_config\` so they can edit the file.
 6. \`browser_not_connected\` (only with AUTOLOGIN_MODE=cdp): ask the user to enable chrome://inspect/#remote-debugging in Chrome.
 

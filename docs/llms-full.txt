@@ -174,7 +174,7 @@ autologin-mcp can reach the tab in two ways and picks one automatically.
 1. The agent calls `login` with the tab's URL. autologin-mcp picks the matching profile.
 2. autologin-mcp returns `run_in_page` with a small loader script, in three forms: `script` (an expression with top-level `await`, for Claude in Chrome's `javascript_tool`), `function` (for tools that take a function, such as Playwright MCP's `browser_evaluate` and chrome-devtools-mcp's `evaluate_script`) and `expression` (a Promise expression without top-level `await`, for Puppeteer's `page.evaluate`). The loader contains only a one-time URL on `127.0.0.1` that expires after 60 seconds. It never contains a credential.
 3. The agent runs the loader in the tab with the JavaScript tool it already has.
-4. The page loads the form filler from `127.0.0.1` and asks for the credentials. The bridge releases them only if the request's `Origin` header belongs to the profile's root URL. Browsers set this header themselves and page scripts cannot change it, so a page on another site gets nothing.
+4. The page loads the form filler from `127.0.0.1`, looks for the login form, and only when it is about to type asks for the credentials. A page without a login form, or one a person has to finish (single sign-on, a passkey, a captcha), never receives them. The bridge releases them only if the request's `Origin` header belongs to the profile's root URL. Browsers set this header themselves and page scripts cannot change it, so a page on another site gets nothing.
 5. The filler fills the form, submits it, waits for the outcome and returns it to the agent: `success`, `submitted`, `failed` with the page's error message, or `no_login_form`. It also reports the outcome to autologin-mcp.
 
 If the agent's JavaScript call is cut off (the page navigated, or another extension took over the tab), the login still runs. The agent calls `login_status` to get the outcome the page reported. If the agent runs the same script again instead, it receives the first run's outcome with a note, and the credentials are not released a second time.
@@ -404,7 +404,7 @@ The value it returns is the login result below. The script works once, within 60
 | `success` | Logged in. `url` is the page after login. | Continue the task. |
 | `submitted` | The form was submitted and the page navigated before the outcome was visible (bridge mode). With `reason: username_step_navigated`, only the username of an identifier-first page was sent before the page navigated; that is not counted as a login that went through. | Look at the page to confirm the login. With `username_step_navigated`, call `login` again on the next page. |
 | `failed` | Still on the login form. `hint` carries the page's error message (password removed), `reason` the cause: `still_on_login_form`, or `identifier_rejected` (the username step of an identifier-first page refused the account). | Tell the user the `hint`. Retry at most once. |
-| `needs_human` | The page wants something only a person can do. `reason: password_step_timeout`: after the username step of an identifier-first page no password field appeared, typically single sign-on, a passkey or a second factor. `reason: left_profile_site` (CDP mode): the tab moved to another site before anything was typed, typically a single sign-on host; nothing was typed there. No password was sent, so it does not count toward the rate limit. | Tell the user the `hint`. Do not retry. |
+| `needs_human` | The page wants something only a person can do; `reason` says what. `sso`: the tab is on a single sign-on provider, or the login page offers only "Sign in with ..." buttons. `passkey`: the page asks for a passkey or security key. `captcha`: a captcha challenge stands before the login. `mfa_required`: after the password, the page asks for a one-time code. `password_step_timeout`: after the username step of an identifier-first page, no password field appeared. `left_profile_site` (CDP mode): the tab moved to another site before anything was typed. Except for `mfa_required`, no password was sent; none of them counts toward the rate limit. | Tell the user the `hint`. Do not retry. |
 | `no_login_form` | No visible password field was found. If `previous_login` shows a recent `success` or `submitted`, the tab is already logged in. | With `previous_login`: continue. Otherwise ask the user to set selectors for the profile. |
 | `origin_mismatch` | The URL or the page's origin does not belong to any (or the requested) profile. Nothing was filled. | Ask the user to add a profile for this site. |
 | `ambiguous_profile` | Several profiles match. `candidates` lists them. | Call `login` again with `profile`. |
@@ -606,7 +606,7 @@ autologin-mcp has one job: an AI agent can log in to the app it is testing, but 
 | The agent reads the credentials file with `Read`, `cat`, `grep` or a sub-agent | `install` adds a Claude Code **PreToolUse hook** that blocks every tool call touching `~/.autologin-mcp`: file tools by path, shell commands and other tools by text. Hooks also run in "skip permissions" mode. `Read`/`Edit` deny rules are a second layer. |
 | A password in a tool result or an error message | Every result passes through a redactor that removes each configured password and its URL-encoded form. The in-page filler scrubs the password from any error text it returns. |
 | A password in the environment | Values are parsed in memory and never copied into `process.env`. |
-| A malicious or prompt-injected page asks the agent to "log in here" | A profile only fills pages whose host matches its root URL. In CDP mode the host comes from Chrome itself; in bridge mode from the `Origin` header, which the browser sets and page scripts cannot change. |
+| A malicious or prompt-injected page asks the agent to "log in here" | A profile only fills pages whose host matches its root URL. In bridge mode the credentials are requested only after the page showed a login form to fill, so a page without one never receives them. In CDP mode the host comes from Chrome itself; in bridge mode from the `Origin` header, which the browser sets and page scripts cannot change. |
 | Another program or page uses the bridge | The bridge listens on `127.0.0.1` only, on a random port. Each script carries a random 192-bit token, works once and expires after 60 seconds. A profile can be released at most 20 times in five minutes. |
 | The agent re-runs a used script | It receives the first run's outcome, not the credentials. |
 | A wrong password locks the account | After three failed logins in five minutes, the profile is paused (`rate_limited`). |
@@ -759,6 +759,18 @@ What the results mean:
 - `failed` with `reason: identifier_rejected`: the page showed a new message after the username, for example "No account for this email"; the `hint` has it. Messages that were already on the page before, such as "Your session has expired", are ignored.
 - If the continue button has unusual text, the username step also has a picker (a language or country code), or its button sits far from the field, set `<PROFILE>_SUBMIT_SELECTOR`: with an explicit button the one-field rule is skipped.
 
+## `needs_human`
+
+The page wants something only a person can do, and autologin-mcp stopped without retrying. The `reason` says what:
+
+- `sso`: the tab is on a single sign-on provider (Google, Microsoft, Okta, ...), or the login page offers only "Sign in with ..." buttons. Sign in yourself; autologin-mcp fills only the app's own username and password form.
+- `passkey`: the page asks for a passkey or a security key, which needs your device.
+- `captcha`: a captcha stands before the login. Solve it, then let the agent call `login` again if the form appears.
+- `mfa_required`: the password was accepted and the page asks for a one-time code. Filling TOTP codes is planned ([#1](https://github.com/olgaysezgin/autologin-mcp/issues/1)).
+- `password_step_timeout`, `left_profile_site`: see the identifier-first section above.
+
+Pages are classified only after the usual detect time (5 seconds), so a login form that renders late is still filled. In bridge mode the credentials are not even requested for these pages.
+
 ## `failed` although the credentials are right
 
 - The heuristic may not find the right button. Set `<PROFILE>_SUBMIT_SELECTOR`.
@@ -838,7 +850,7 @@ A profile only fills pages whose host matches its root URL. In bridge mode, the 
 
 ## Does it support SSO, OAuth, two-factor authentication or multi-step logins?
 
-It handles the common username + password form on the app's own page, including React, Vue and Angular forms and identifier-first logins (email, then the password field on the same page). Logins that navigate to a second document, iframes, SSO login hosts and TOTP codes are on the [roadmap](https://github.com/olgaysezgin/autologin-mcp#roadmap).
+It fills the common username + password form on the app's own page, including React, Vue and Angular forms and identifier-first logins (email, then the password field on the same page). Single sign-on, passkeys, captchas and a one-time code after the password are recognised and handed to you (`needs_human`) instead of failing or retrying. Filling TOTP codes, logins that navigate to a second document, and iframes are on the [roadmap](https://github.com/olgaysezgin/autologin-mcp#roadmap).
 
 ## Can I use several accounts for the same app?
 

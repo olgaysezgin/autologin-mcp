@@ -35,7 +35,7 @@ A profile only fills pages whose host matches its root URL. In bridge mode, the 
 
 ## Does it support SSO, OAuth, two-factor authentication or multi-step logins?
 
-It handles the common username + password form on the app's own page, including React, Vue and Angular forms and identifier-first logins (email, then the password field on the same page). Logins that navigate to a second document, iframes, SSO login hosts and TOTP codes are on the [roadmap](https://github.com/olgaysezgin/autologin-mcp#roadmap).
+It fills the common username + password form on the app's own page, including React, Vue and Angular forms and identifier-first logins (email, then the password field on the same page). Single sign-on, passkeys, captchas and a one-time code after the password are recognised and handed to you (`needs_human`) instead of failing or retrying. Filling TOTP codes, logins that navigate to a second document, and iframes are on the [roadmap](https://github.com/olgaysezgin/autologin-mcp#roadmap).
 
 ## Can I use several accounts for the same app?
 

@@ -32,6 +32,11 @@ export interface DetectResult {
    * belong to a one-page form whose password field has not rendered yet, so callers wait longer for it.
    */
   nextButton?: boolean;
+  /**
+   * No password field and no username step, but the page wants something only a person can do:
+   * single sign-on buttons, a passkey prompt or a captcha challenge.
+   */
+  blocker?: 'sso' | 'passkey' | 'captcha';
   error?: string;
 }
 
@@ -40,6 +45,8 @@ export interface StateResult {
   passwordVisible: boolean;
   success: boolean;
   errorText: string | null;
+  /** Present (true) when a one-time-code field is visible: a second factor after the password. */
+  codeVisible?: true;
 }
 
 export type SubmitResult = 'clicked' | 'submitted' | 'none';
@@ -114,11 +121,21 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
       return null;
     };
     const errorText = findError();
+    // A field for a one-time code (an authenticator app, SMS or email code): a second factor.
+    const CODE_FIELD =
+      /^(otp|totp|mfa|2fa|code|one[-_]?time[-_]?(code|password)|verification[-_]?code|security[-_]?code|auth(entication)?[-_]?code|sms[-_]?code|(otp|totp|mfa)[-_]?code)$/i;
+    const codeVisible = Array.from(document.querySelectorAll('input')).some(
+      (el) =>
+        usable(el) &&
+        el.type !== 'password' &&
+        ((el.getAttribute('autocomplete') ?? '').toLowerCase().split(/\s+/).includes('one-time-code') || [el.name, el.id].some((word) => CODE_FIELD.test(word))),
+    );
     return {
       ready: document.readyState !== 'loading',
       passwordVisible: Array.from(document.querySelectorAll('input[type="password"]')).some(visible),
       success: visible(find(arg.successSelector)),
       errorText: errorText === null ? null : errorText.slice(0, 200),
+      ...(codeVisible ? { codeVisible: true as const } : {}),
     };
   }
 
@@ -216,7 +233,19 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
         button.setAttribute(ATTR, 'submit');
         return { found: false, hasUsername: true, hasSubmit: true, step: 'identifier', nextButton: NEXT_TEXT.test(label(button)) };
       }
-      return { found: false, hasUsername: false, hasSubmit: false };
+      // No form to fill. Does the page want something only a person can do? Only checked here, without a
+      // password field or a username step: SSO buttons, passkeys and invisible captchas sit on many normal
+      // login pages and block nothing there.
+      const CAPTCHA_FRAME = /\/recaptcha\/(api2|enterprise)\/(anchor|bframe)|hcaptcha\.com\/captcha|challenges\.cloudflare\.com/i;
+      const SSO_TEXT =
+        /^((sign|log) ?in|login|continue|sign up) (with|using|via) (google|microsoft|apple|github|gitlab|okta|azure( ad)?|facebook|linkedin|slack|saml|sso|single sign-on|your (company|organi[sz]ation)( account)?)$|^(single sign-on|sso|use sso|enterprise sso)$|^(google|microsoft|apple|github|sso) ile (giri[sş] yap|oturum a[cç]|devam et)$/i;
+      const PASSKEY_TEXT = /passkey|security key|ge[cç]i[sş] anahtar|g[uü]venlik anahtar|(sign in with|use) (face id|touch id|windows hello)/i;
+      const captcha =
+        Array.from(document.querySelectorAll('iframe')).some((frame) => visible(frame) && CAPTCHA_FRAME.test(frame.src) && !/[?&]size=invisible/.test(frame.src)) ||
+        visible(document.querySelector('#challenge-form, #challenge-stage, #cf-challenge-running'));
+      const actions = Array.from(document.querySelectorAll(`${BUTTONS}, a`)).filter(visible).map(label);
+      const blocker = captcha ? 'captcha' : actions.some((t) => SSO_TEXT.test(t)) ? 'sso' : actions.some((t) => PASSKEY_TEXT.test(t)) ? 'passkey' : null;
+      return blocker === null ? { found: false, hasUsername: false, hasSubmit: false } : { found: false, hasUsername: false, hasSubmit: false, blocker };
     }
     password = el as HTMLInputElement;
   }

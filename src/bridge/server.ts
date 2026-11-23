@@ -141,7 +141,10 @@ export class BridgeServer {
 
     if (kind === 'filler') {
       const script = allowed
-        ? fillerScript(base, token, this.timing, this.options.noFormContext?.(profile.name) ?? null)
+        ? fillerScript(base, token, this.timing, this.options.noFormContext?.(profile.name) ?? null, {
+            selectors: { username: profile.selectors.username, password: profile.selectors.password, submit: profile.selectors.submit },
+            successSelector: profile.selectors.success,
+          })
         : `window.dispatchEvent(new CustomEvent(${JSON.stringify(`autologin-mcp:${token}`)}, { detail: ${JSON.stringify(mismatch)} }));`;
       return send(200, script, 'text/javascript');
     }

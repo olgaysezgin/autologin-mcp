@@ -301,3 +301,45 @@ describe('scripts', () => {
     expect(await runAgent(() => vi.advanceTimersByTime(30_000))).toMatchObject({ status: 'error', hint: 'autologin-mcp bridge timed out' });
   });
 });
+
+describe('bridgeLogin: credentials only when there is a form to fill (#2)', () => {
+  const lazy = () => {
+    const load = vi.fn(async () => ({ username: CREDS.username, password: CREDS.password }));
+    return { creds: { selectors: {}, load }, load };
+  };
+
+  it('never asks for the credentials on a page without a login form, or on one a person has to finish', async () => {
+    document.body.innerHTML = `<p>Dashboard</p>`;
+    let { creds, load } = lazy();
+    expect(await bridgeLogin(autologinInpage, creds, TIMING)).toMatchObject({ status: 'no_login_form' });
+    expect(load).not.toHaveBeenCalled();
+    document.body.innerHTML = `<main><button>Sign in with Google</button></main>`;
+    ({ creds, load } = lazy());
+    expect(await bridgeLogin(autologinInpage, creds, TIMING)).toMatchObject({ status: 'needs_human', reason: 'sso' });
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  it('asks for the credentials once, right before typing', async () => {
+    let received: unknown = null;
+    app((state) => {
+      received = { ...state };
+      document.querySelector('#login')!.remove();
+    });
+    const { creds, load } = lazy();
+    expect(await bridgeLogin(autologinInpage, creds, TIMING)).toEqual({ status: 'success', url: location.href });
+    expect(load).toHaveBeenCalledOnce();
+    expect(received).toEqual({ username: CREDS.username, password: CREDS.password });
+  });
+
+  it('types nothing when the credentials are refused', async () => {
+    app(() => undefined);
+    const creds = { selectors: {}, load: vi.fn(async () => Promise.reject(new Error('refused'))) };
+    expect(await bridgeLogin(autologinInpage, creds, TIMING)).toMatchObject({ status: 'error', hint: 'refused' });
+    expect(document.querySelector<HTMLInputElement>('#user')!.value).toBe('');
+  });
+
+  it('reports a one-time-code step after the password as mfa_required', async () => {
+    app(() => (document.querySelector('#login')!.innerHTML = '<input id="otp" autocomplete="one-time-code" inputmode="numeric">'));
+    expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
+  });
+});

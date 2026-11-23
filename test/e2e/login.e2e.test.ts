@@ -96,6 +96,17 @@ describe('login engine in a real Chrome (auto-connect via DevToolsActivePort)', 
     expect(app.received.at(-1)).toEqual(VALID);
   });
 
+  it('hands single sign-on and captcha pages to a human, and reports a code step after the password (#2)', async () => {
+    const quick = { ...FAST, detectTimeoutMs: 800 };
+    const before = app.received.length;
+    expect((await loginOn('sso.html', profile(), quick)).result).toMatchObject({ status: 'needs_human', reason: 'sso' });
+    expect((await loginOn('captcha.html', profile(), quick)).result).toMatchObject({ status: 'needs_human', reason: 'captcha' });
+    expect(app.received.length).toBe(before);
+    const { result } = await loginOn('mfa.html', profile());
+    expect(result).toMatchObject({ status: 'needs_human', reason: 'mfa_required', hint: expect.stringContaining('one-time code') });
+    expect(app.received.at(-1)).toEqual(VALID);
+  });
+
   it('types nothing on another site when the username step leads there', async () => {
     const other = await startFixtureServer(); // another port: another site, like a single sign-on host
     try {
@@ -222,6 +233,28 @@ describe('bridge mode in a real Chrome (autologin-mcp has no CDP access)', () =>
     expect(await staggered.tab.evaluate('window.submits')).toBe(1);
     const slow = await bridgeOn('two-step-slow.html', profile());
     expect(slow.result.status).toBe('success');
+    expect(app.received.at(-1)).toEqual(VALID);
+  });
+
+  it('never fetches the credentials on single sign-on or captcha pages, and reports a code step (#2)', async () => {
+    const run = async (file: string) => {
+      const tab = await open(file);
+      const asked: string[] = [];
+      tab.on('request', (request) => {
+        if (request.url().includes('/v1/credentials/')) asked.push(request.url());
+      });
+      const fn = (await bridge.issue(profile())).function;
+      const result = await tab.evaluate(`(${fn})()`);
+      await tab.close();
+      return { result, asked };
+    };
+    // Control: on a normal login page the same listener does see the credentials request.
+    expect(await run('controlled.html')).toMatchObject({ result: { status: 'success' }, asked: [expect.stringContaining('/v1/credentials/')] });
+    for (const [file, reason] of [['sso.html', 'sso'], ['captcha.html', 'captcha']] as const) {
+      expect(await run(file)).toEqual({ result: expect.objectContaining({ status: 'needs_human', reason }), asked: [] });
+    }
+    const { result } = await bridgeOn('mfa.html', profile());
+    expect(result).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
     expect(app.received.at(-1)).toEqual(VALID);
   });
 

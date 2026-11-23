@@ -10,6 +10,7 @@ import type { ResultLog } from './results.js';
 import type { LoadedStore } from './store/envfile.js';
 import { hostOf, matchesUrl } from './store/match.js';
 import { isUsable, type UsableProfile } from './store/profiles.js';
+import { ssoProvider } from './sso.js';
 
 export const ADD_HINT =
   'Ask the user to run "npx autologin-mcp add" in a separate terminal (never in this chat), or call open_config so they can edit the credentials file.';
@@ -25,7 +26,7 @@ export const INSTRUCTIONS = [
   "autologin-mcp signs the browser tab you are testing into its app with credentials that stay on the user's machine; you never see them.",
   '- When a page under test shows a login form, a "session expired" message, a 401/403, or redirects to a login URL, call `login`, then continue the task. Pass `url` (the tab URL) and, when several accounts exist for the app, `profile`.',
   `- If \`login\` returns \`run_in_page\`: ${RUN_IN_PAGE_HINT} On \`submitted\`, check the page to confirm you are logged in.`,
-  '- On `needs_human`, the page wants something only a person can do (single sign-on, a passkey or a second factor): tell the user the hint and do not retry.',
+  '- On `needs_human`, the page wants something only a person can do (single sign-on, a passkey, a captcha or a second factor): tell the user the hint and do not retry.',
   '- `list_profiles` shows which apps (root URLs) and usernames are configured; `login_status` shows the latest login outcome per profile.',
   '- Never ask the user for a password, never type credentials into a page yourself, never read files under ~/.autologin-mcp, never modify the login script, and do not inspect the login request body in network logs or read password field values.',
   `- If no profile matches: ${ADD_HINT}`,
@@ -134,6 +135,17 @@ export async function runLogin(deps: ServerDeps, store: LoadedStore, args: Login
   }
   const usable = store.profiles.filter(isUsable);
   if (usable.length === 0) return { status: 'no_profile', hint: `No usable profile is configured. ${ADD_HINT}` };
+
+  // A tab on a single sign-on provider is not a profile's site, but "add a profile" would be the wrong advice.
+  const provider = args.url === undefined || usable.some((p) => matchesUrl(p.root, args.url!)) ? null : ssoProvider(args.url);
+  if (provider !== null) {
+    return {
+      status: 'needs_human',
+      url: args.url,
+      reason: 'sso',
+      hint: `The tab is on ${provider}, a single sign-on provider, so a human has to finish this login. autologin-mcp only fills the app's own username and password form.`,
+    };
+  }
 
   const mode = store.settings.mode ?? 'auto';
   if (mode !== 'bridge') {

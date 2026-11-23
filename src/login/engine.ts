@@ -68,6 +68,14 @@ export const DEFAULT_TIMING: LoginTiming = { detectTimeoutMs: 5_000, verifyTimeo
 export const identifierSettleMs = (timing: { detectTimeoutMs: number; pollMs: number }): number =>
   Math.min(timing.detectTimeoutMs, Math.max(4 * timing.pollMs, timing.detectTimeoutMs / 2));
 
+/** Hints for `needs_human`; bridge mode (src/bridge/filler.ts) carries the same words. */
+export const NEEDS_HUMAN_HINTS = {
+  sso: 'This page signs in through single sign-on (another provider), so a human has to finish this login. autologin-mcp only fills the app\'s own username and password form.',
+  passkey: 'This page asks for a passkey or security key, which needs the user\'s device, so a human has to finish this login.',
+  captcha: 'This page shows a captcha. A human has to solve it; autologin-mcp does not.',
+  mfa_required: 'The page now asks for a one-time code (a second factor) after the password, so a human has to enter it.',
+} as const;
+
 export const PASSWORD_STEP_HINT =
   'The page did not ask for a password after the username step. It may use single sign-on, a passkey or a second factor, so a human has to finish this login.';
 
@@ -179,6 +187,7 @@ export async function performLogin(
     }
     if (!detected?.found) {
       if (detected?.step !== 'identifier' || !detected.hasUsername) {
+        if (detected?.blocker) return { status: 'needs_human', ...base, url: page.url(), reason: detected.blocker, hint: NEEDS_HUMAN_HINTS[detected.blocker] };
         return { status: 'no_login_form', ...base, url: page.url(), hint: detected?.error ?? 'No visible password field was found on the page.' };
       }
       // Identifier-first login: send the username, then wait for the page to ask for the password.
@@ -224,6 +233,9 @@ export async function performLogin(
       if (current?.ready) {
         last = current;
         if (current.success) return { status: 'success', ...base, url: page.url() };
+        if (current.codeVisible && !current.passwordVisible) {
+          return { status: 'needs_human', ...base, url: page.url(), reason: 'mfa_required', hint: NEEDS_HUMAN_HINTS.mfa_required };
+        }
         if (!current.passwordVisible) {
           goneStreak += 1;
           if (goneStreak >= 2) return { status: 'success', ...base, url: page.url() };

@@ -229,6 +229,14 @@ describe('MCP server', () => {
     expect((await call(c, 'login')).body).toMatchObject({ status: 'rate_limited', profile: 'app' });
   });
 
+  it('answers a tab on a known single sign-on host with needs_human instead of origin_mismatch (#2)', async () => {
+    const c = await connect(makeDeps({ getBrowser: async () => Promise.reject(new Error('no remote debugging')) }));
+    for (const url of ['https://accounts.google.com/v3/signin/identifier?continue=x', 'https://login.microsoftonline.com/common/oauth2/authorize', 'https://acme.okta.com/oauth2/v1/authorize']) {
+      expect((await call(c, 'login', { url })).body).toMatchObject({ status: 'needs_human', reason: 'sso', url, hint: expect.stringContaining('single sign-on') });
+    }
+    expect((await call(c, 'login', { url: 'https://evil.test/' })).body).toMatchObject({ status: 'origin_mismatch' });
+  });
+
   it('does not count needs_human toward the rate limit: no password was sent', async () => {
     const c = await connect(makeDeps({ login: async () => ({ status: 'needs_human', reason: 'password_step_timeout' }) }));
     for (let i = 0; i < 4; i += 1) expect((await call(c, 'login')).body).toMatchObject({ status: 'needs_human' });
