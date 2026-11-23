@@ -2,6 +2,10 @@
 
 Every version below is the same version in `package.json`, the git tag `v<version>`, the npm package and the GitHub release. The release workflow refuses to publish when they disagree.
 
+## Unreleased
+
+- Identifier-first logins: when a page asks for the email or username first and swaps in the password field after Continue/Next, the login now fills both steps in CDP and bridge mode. A newsletter form with an email field is not mistaken for one. `failed` gains `reason: identifier_rejected` and `reason: password_step_timeout`, both documented in the tools and troubleshooting pages.
+
 ## 1.1.0 - 2026-11-23
 
 - Bridge mode: `run_in_page` also returns `expression`, the loader as a Promise expression without top-level `await`, for tools that evaluate a plain script such as Puppeteer's `page.evaluate`. There, `script` failed with "await is not defined".

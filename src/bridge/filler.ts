@@ -44,11 +44,47 @@ export async function bridgeLogin(inpage: typeof autologinInpage, creds: BridgeC
   try {
     const startedAt = Date.now();
     let detected = inpage('detect', { selectors: creds.selectors }) as DetectResult;
-    while (!detected.found && !detected.error && Date.now() - startedAt < timing.detectTimeoutMs) {
+    while (!detected.found && detected.step !== 'identifier' && !detected.error && Date.now() - startedAt < timing.detectTimeoutMs) {
       await sleep(timing.pollMs);
       detected = inpage('detect', { selectors: creds.selectors }) as DetectResult;
     }
-    if (!detected.found) return finish('no_login_form', { hint: detected.error ?? 'No visible password field was found on the page.' });
+    if (!detected.found) {
+      if (detected.step !== 'identifier' || !detected.hasUsername) return finish('no_login_form', { hint: detected.error ?? 'No visible password field was found on the page.' });
+      // Identifier-first login: send the username, then wait for the password step.
+      const stepField = document.querySelector<HTMLInputElement>(`[${ATTR}="username"]`)!;
+      window.addEventListener('beforeunload', onLeave, { once: true });
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(stepField, creds.username);
+      stepField.dispatchEvent(new Event('input', { bubbles: true }));
+      stepField.dispatchEvent(new Event('change', { bubbles: true }));
+      if ((inpage('submit', {}) as SubmitResult) === 'none') {
+        for (const type of ['keydown', 'keypress', 'keyup']) {
+          stepField.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+        }
+      }
+      const stepStart = Date.now();
+      let next = inpage('detect', { selectors: creds.selectors }) as DetectResult;
+      while (!next.found) {
+        if (leaving) return finish('submitted', { hint: 'The page navigated after the username step; run the login again on the password page.' });
+        const current = inpage('state', { successSelector: creds.successSelector }) as StateResult;
+        if (current.errorText) return finish('failed', { reason: 'identifier_rejected', hint: scrub(current.errorText) });
+        if (Date.now() - stepStart >= timing.detectTimeoutMs) {
+          return finish('failed', {
+            reason: 'password_step_timeout',
+            hint: 'The page did not ask for a password after the username step. It may use single sign-on or a second factor, so a human has to finish this login.',
+          });
+        }
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, timing.pollMs);
+          wake = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+        });
+        if (leaving) return finish('submitted', { hint: 'The page navigated after the username step; run the login again on the password page.' });
+        next = inpage('detect', { selectors: creds.selectors }) as DetectResult;
+      }
+      detected = next;
+    }
 
     const before = inpage('state', { successSelector: creds.successSelector }) as StateResult;
     const fill = (role: string, value: string): void => {
@@ -64,7 +100,7 @@ export async function bridgeLogin(inpage: typeof autologinInpage, creds: BridgeC
 
     window.addEventListener('beforeunload', onLeave, { once: true });
     if ((inpage('submit', {}) as SubmitResult) === 'none') {
-      const field = document.querySelector(`[${ATTR}="password"]`)!;
+      const field = document.querySelector<HTMLInputElement>(`[${ATTR}="password"]`) ?? document.querySelector<HTMLInputElement>(`[${ATTR}="username"]`)!;
       for (const type of ['keydown', 'keypress', 'keyup']) {
         field.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
       }

@@ -152,7 +152,7 @@ No. It goes from the local credentials file straight into the page, through the 
 No. Bridge mode needs no browser setup. Remote debugging enables CDP mode, which also works when the app's Content-Security-Policy blocks the bridge.
 
 **Does it support SSO, 2FA or multi-step logins?**
-Not yet: it handles username + password forms on the app's own page. Multi-step logins, iframes, SSO hosts and TOTP are on the roadmap.
+It handles username + password forms on the app's own page, including identifier-first logins that ask for the email and then swap in the password field. Logins that move to another document, iframes, SSO hosts and TOTP are on the roadmap.
 
 **Is it free?**
 Yes, MIT licensed.
@@ -162,7 +162,7 @@ More questions: [FAQ](docs/faq.md).
 ## Roadmap
 
 - [ ] Opt-in auto-login (CDP mode): watch a profile's URL and log in without the agent asking
-- [ ] Multi-step logins (username → next → password), iframes, SSO login hosts
+- [ ] Logins that navigate between documents, iframes, SSO login hosts
 - [ ] TOTP codes
 - [ ] `doctor` and `test <profile>` commands
 - [ ] Installers that write the config for Codex CLI, Gemini CLI and Cursor (`print-config` prints it today); a Claude Code plugin

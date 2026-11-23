@@ -177,6 +177,43 @@ describe('performLogin', () => {
     expect(await performLogin(broken, profile, timing, fakeClock())).toMatchObject({ status: 'error', hint: 'raw failure' });
   });
 
+  it('handles an identifier-first page: username first, then the password step', async () => {
+    const identifier: DetectResult = { found: false, hasUsername: true, hasSubmit: true, step: 'identifier' };
+    const page = new FakePage([identifier, FOUND], [onForm(), loggedIn]);
+    expect(await performLogin(page, profile, timing, fakeClock())).toEqual({ status: 'success', profile: 'app', url: 'https://app.test/login' });
+    expect(page.typed).toEqual(['qa', 'qa', 'pw']);
+    expect(page.calls).toContain('click:submit');
+  });
+
+  it('fills the username again when the password step repeats it', async () => {
+    const identifier: DetectResult = { found: false, hasUsername: true, hasSubmit: true, step: 'identifier' };
+    const withUsername: DetectResult = { found: true, hasUsername: true, hasSubmit: true };
+    const page = new FakePage([identifier, withUsername], [onForm(), loggedIn]);
+    expect((await performLogin(page, profile, timing, fakeClock())).status).toBe('success');
+    expect(page.typed).toEqual(['qa', 'qa', 'pw']);
+  });
+
+  it('stops when the identifier step shows an error', async () => {
+    const identifier: DetectResult = { found: false, hasUsername: true, hasSubmit: true, step: 'identifier' };
+    const page = new FakePage([identifier], [onForm(), onForm('We could not find your account')]);
+    expect(await performLogin(page, profile, timing, fakeClock())).toEqual({
+      status: 'failed',
+      profile: 'app',
+      url: 'https://app.test/login',
+      reason: 'identifier_rejected',
+      hint: 'We could not find your account',
+    });
+    expect(page.typed).toEqual(['qa']);
+  });
+
+  it('reports a timeout when the password step never appears', async () => {
+    const identifier: DetectResult = { found: false, hasUsername: true, hasSubmit: true, step: 'identifier' };
+    const page = new FakePage([identifier], [onForm()]);
+    const clock = fakeClock();
+    expect(await performLogin(page, profile, timing, clock)).toMatchObject({ status: 'failed', reason: 'password_step_timeout', hint: expect.stringContaining('single sign-on') });
+    expect(clock.t).toBe(1_000);
+  });
+
   it('has sane defaults and a real clock', async () => {
     expect(DEFAULT_TIMING.verifyTimeoutMs).toBeGreaterThan(DEFAULT_TIMING.earlyFailAfterMs);
     const sleep = vi.spyOn(globalThis, 'setTimeout');
