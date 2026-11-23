@@ -43,10 +43,10 @@ npx autologin-mcp print-config --client codex     # json (default), claude-deskt
 
 | Agent | Where the entry goes | Or run |
 |---|---|---|
-| Codex CLI | `~/.codex/config.toml` | `codex mcp add autologin -- npx -y autologin-mcp@1.0.1` |
-| Gemini CLI | `~/.gemini/settings.json` | `gemini mcp add -s user autologin npx -- -y autologin-mcp@1.0.1` |
-| Hermes Agent | `~/.hermes/config.yaml` (`mcp_servers:`) | `hermes mcp add autologin --command npx --args -y autologin-mcp@1.0.1` |
-| VS Code (GitHub Copilot) | `.vscode/mcp.json` or the user `mcp.json` (`servers`) | `code --add-mcp '{"name":"autologin","type":"stdio","command":"npx","args":["-y","autologin-mcp@1.0.1"]}'` |
+| Codex CLI | `~/.codex/config.toml` | `codex mcp add autologin -- npx -y autologin-mcp@1.1.0` |
+| Gemini CLI | `~/.gemini/settings.json` | `gemini mcp add -s user autologin npx -- -y autologin-mcp@1.1.0` |
+| Hermes Agent | `~/.hermes/config.yaml` (`mcp_servers:`) | `hermes mcp add autologin --command npx --args -y autologin-mcp@1.1.0` |
+| VS Code (GitHub Copilot) | `.vscode/mcp.json` or the user `mcp.json` (`servers`) | `code --add-mcp '{"name":"autologin","type":"stdio","command":"npx","args":["-y","autologin-mcp@1.1.0"]}'` |
 | Cursor | `~/.cursor/mcp.json` or `.cursor/mcp.json` | |
 | Claude Desktop | `claude_desktop_config.json` (Settings > Developer > Edit Config) | |
 
@@ -55,7 +55,7 @@ Most of them use the common `mcpServers` JSON format:
 ```json
 {
   "mcpServers": {
-    "autologin": { "command": "npx", "args": ["-y", "autologin-mcp@1.0.1"] }
+    "autologin": { "command": "npx", "args": ["-y", "autologin-mcp@1.1.0"] }
   }
 }
 ```
