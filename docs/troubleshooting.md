@@ -41,7 +41,7 @@ Before it sends the username alone, autologin-mcp makes sure the page really is 
 - The field must be the only field to type into in its form, or in a small container around it (up to three levels), and the button must come after it there. A signup, checkout or invite form with more fields is left alone, and so is a footer newsletter field next to a header "Sign in" button.
 - With a **Next** or **Continue** button, the username step has to stay on the page for half the detect time (2.5 seconds).
 - With a **Log in** or **Sign in** button, autologin-mcp first waits the whole detect time (5 seconds) for a password field.
-- A form with nothing but an email field named `email` and a **Next** button looks exactly like a username step. The agent only calls `login` on login pages, but on such a form in a logged-in app the username would be sent.
+- A form with nothing but an email field named `email` and a **Next** button looks exactly like a username step. The agent calls `login` when it sees a login form, a "session expired" message, a 401/403 or a login redirect; if that happens on a logged-in page with such a form, the username would be sent there. Use test accounts, as everywhere with autologin-mcp.
 
 What the results mean:
 
@@ -49,7 +49,7 @@ What the results mean:
 - `needs_human` with `reason: left_profile_site` (CDP mode): the username step sent the tab to another site, typically a single sign-on host. Nothing is typed there.
 - `submitted` with `reason: username_step_navigated` (bridge mode): the page navigated after the username. Run `login` again on the next page.
 - `failed` with `reason: identifier_rejected`: the page showed a new message after the username, for example "No account for this email"; the `hint` has it. Messages that were already on the page before, such as "Your session has expired", are ignored.
-- If the continue button has unusual text, set `<PROFILE>_SUBMIT_SELECTOR`.
+- If the continue button has unusual text, the username step also has a picker (a language or country code), or its button sits far from the field, set `<PROFILE>_SUBMIT_SELECTOR`: with an explicit button the one-field rule is skipped.
 
 ## `failed` although the credentials are right
 
