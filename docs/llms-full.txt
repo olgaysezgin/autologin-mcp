@@ -91,6 +91,12 @@ npx autologin-mcp add
 
 The profile is saved in `~/.autologin-mcp/credentials.env` with file permissions `600`. You can add as many profiles as you like, including several accounts for the same app (for example `admin` and `viewer`). [Configuration](configuration.md) describes the file format.
 
+In a script or CI job, pipe the password in instead of typing it:
+
+```bash
+printf '%s' "$STAGING_PASSWORD" | npx autologin-mcp add staging --url staging.example.com --username qa@example.com --password-stdin -y
+```
+
 Check what the agent will see:
 
 ```bash
@@ -166,7 +172,7 @@ autologin-mcp can reach the tab in two ways and picks one automatically.
 ```
 
 1. The agent calls `login` with the tab's URL. autologin-mcp picks the matching profile.
-2. autologin-mcp returns `run_in_page` with a small loader script, in two forms: `script` (an expression, for Claude in Chrome's `javascript_tool`) and `function` (for tools that take a function, such as Playwright MCP's `browser_evaluate` and chrome-devtools-mcp's `evaluate_script`). The loader contains only a one-time URL on `127.0.0.1` that expires after 60 seconds. It never contains a credential.
+2. autologin-mcp returns `run_in_page` with a small loader script, in three forms: `script` (an expression with top-level `await`, for Claude in Chrome's `javascript_tool`), `function` (for tools that take a function, such as Playwright MCP's `browser_evaluate` and chrome-devtools-mcp's `evaluate_script`) and `expression` (a Promise expression without top-level `await`, for Puppeteer's `page.evaluate`). The loader contains only a one-time URL on `127.0.0.1` that expires after 60 seconds. It never contains a credential.
 3. The agent runs the loader in the tab with the JavaScript tool it already has.
 4. The page loads the form filler from `127.0.0.1` and asks for the credentials. The bridge releases them only if the request's `Origin` header belongs to the profile's root URL. Browsers set this header themselves and page scripts cannot change it, so a page on another site gets nothing.
 5. The filler fills the form, submits it, waits for the outcome and returns it to the agent: `success`, `submitted`, `failed` with the page's error message, or `no_login_form`. It also reports the outcome to autologin-mcp.
@@ -227,9 +233,9 @@ Because then the password is part of the conversation. Everything the agent read
 
 All configuration lives in one file per user: `~/.autologin-mcp/credentials.env`. It is global on purpose. It sits outside your projects, so it never ends up in git, and the same profiles work in every project.
 
-- `npx autologin-mcp add` creates the file and adds profiles for you, with permissions `600` (only your user can read it).
+- `npx autologin-mcp add` creates the file and adds profiles for you, with permissions `600` (only your user can read it). In scripts and CI, `add --password-stdin` takes the password from a pipe (see [CLI reference](cli.md#scripts-and-ci---password-stdin)).
 - `npx autologin-mcp edit` opens it in `$VISUAL`, `$EDITOR` or your default editor.
-- The agent can ask you to edit it with the `open_config` tool. The tool opens the file in your editor and never returns its content.
+- The agent can ask you to edit it with the `open_config` tool. The tool opens the file in your editor and never returns its content. Without a desktop (SSH, CI, a container) it returns the file's path instead, for you to edit it in a terminal.
 
 Edit the file yourself, in a terminal or an editor, never through the AI chat.
 
@@ -326,6 +332,7 @@ A separate Chrome profile without password managers also avoids extensions that 
 |---|---|
 | `AUTOLOGIN_HOME` | Use this folder instead of `~/.autologin-mcp` for the credentials file |
 | `VISUAL`, `EDITOR` | Editor used by `npx autologin-mcp edit` |
+| `DISPLAY`, `WAYLAND_DISPLAY` | On Linux, `edit` and `open_config` open a desktop editor only when one of these is set |
 | `CHROME_PATH` | Chrome binary for the end-to-end tests (development only) |
 
 The values in the credentials file are parsed in memory. They are never copied into `process.env`, so child processes and error reports cannot pick them up.
@@ -372,11 +379,20 @@ Logs the tab under test into its app.
   "hint": "Run `script` unchanged in the tab that shows the login form ...",
   "expires_in_s": 60,
   "script": "await (async () => ...)()",
-  "function": "async () => ..."
+  "function": "async () => ...",
+  "expression": "(async () => ...)()"
 }
 ```
 
-The agent runs `script` (Claude in Chrome `javascript_tool`) or `function` (Playwright MCP `browser_evaluate`, chrome-devtools-mcp `evaluate_script`) **unchanged** in the tab. The value it returns is the login result below. The script works once, within 60 seconds, and only on a page of the profile's site.
+The agent runs one of the three forms of the same loader **unchanged** in the tab:
+
+| Field | Form | For |
+|---|---|---|
+| `script` | Expression with top-level `await` | Tools with REPL semantics: Claude in Chrome `javascript_tool` |
+| `function` | Function source | Tools that take a function: Playwright MCP `browser_evaluate`, chrome-devtools-mcp `evaluate_script` |
+| `expression` | Expression that evaluates to a Promise, without top-level `await` | Tools that evaluate a plain script and wait for its value: Puppeteer `page.evaluate`, CDP `Runtime.evaluate` with `awaitPromise` |
+
+The value it returns is the login result below. The script works once, within 60 seconds, and only on a page of the profile's site.
 
 **In CDP mode** it fills the tab itself and returns the login result directly.
 
@@ -432,14 +448,24 @@ Outcomes are kept in memory for the lifetime of the MCP server process.
 
 ## `open_config`
 
-Creates the credentials file if needed and opens it in the user's editor, so they can add or change profiles themselves. The file content is never returned. If no editor can be opened, the result asks the user to run `npx autologin-mcp edit`.
+Creates the credentials file if needed and opens it in the user's editor, so they can add or change profiles themselves. The file content is never returned.
+
+Where no editor can be opened (no desktop over SSH, in CI or in a Linux container, or the opener fails right away), the result says so instead of claiming success, and gives the agent the file's path to pass on:
+
+```json
+{
+  "file": "/home/you/.autologin-mcp/credentials.env",
+  "opened": false,
+  "hint": "Could not open an editor here (there is no desktop session here ...). Ask the user to run \"npx autologin-mcp add\" in a separate terminal (never in this chat), or to open this file in a text editor there. Do not read this file."
+}
+```
 
 ## Server instructions
 
 The server sends these instructions to the MCP client at startup, so even an agent with no skill or memory knows when to use it:
 
 - When a page under test shows a login form, a "session expired" message, a 401/403, or redirects to a login URL, call `login`, then continue the task.
-- If `login` returns `run_in_page`, run `script` unchanged in the tab; if that call fails or returns nothing, call `login_status`.
+- If `login` returns `run_in_page`, run `script` unchanged in the tab (or `function` / `expression`, depending on the browser tool); if that call fails or returns nothing, call `login_status`.
 - Never ask the user for a password, never type credentials into a page, never read files under `~/.autologin-mcp`, never modify the login script, and do not inspect the login request body or read password field values.
 
 ---
@@ -452,10 +478,12 @@ The server sends these instructions to the MCP client at startup, so even an age
 npx autologin-mcp                    Run the MCP server on stdio (what Claude Code starts)
 npx autologin-mcp install [-y] [--dry-run] [--package <spec>]
 npx autologin-mcp uninstall [-y] [--dry-run] [--purge]
-npx autologin-mcp add [name] [--url <root-url>] [--username <user>]
+npx autologin-mcp add [name] [--url <root-url>] [--username <user>] [-y]
+npx autologin-mcp add <name> --url <root-url> --username <user> --password-stdin [-y]
 npx autologin-mcp list
 npx autologin-mcp remove <name> [-y]
 npx autologin-mcp edit
+npx autologin-mcp print-config [--client <name>] [--package <spec>]
 npx autologin-mcp --version | --help
 ```
 
@@ -493,12 +521,26 @@ Removes the MCP server, the skill, the hook and the deny rules.
 
 ## `add`
 
-Adds a profile. If a profile with the same name exists, it asks before replacing it. The password is asked with hidden input, twice.
+Adds a profile. If a profile with the same name exists, it asks before replacing it (`-y` replaces it without asking). The password is asked with hidden input, twice.
 
 ```bash
 npx autologin-mcp add                                   # asks for everything
 npx autologin-mcp add staging --url staging.example.com --username qa@example.com
 ```
+
+### Scripts and CI: `--password-stdin`
+
+With `--password-stdin`, `add` asks nothing: it reads the password from a pipe, like `docker login --password-stdin`. The profile name, `--url` and `--username` are required, one trailing newline is dropped, and an existing profile is replaced only with `-y`.
+
+```bash
+printf '%s' "$STAGING_PASSWORD" | npx autologin-mcp add staging \
+  --url staging.example.com --username qa@example.com --password-stdin -y
+```
+
+- Pipe the password from a secret store or an environment variable, so it never appears in the command line, your shell history or the process list. There is deliberately no `--password <value>` option.
+- From a keyboard, `--password-stdin` refuses to run; leave it out to type the password hidden.
+- In CI, set `AUTOLOGIN_HOME` to keep the credentials file in a throwaway folder (see [Configuration](configuration.md#environment-variables)).
+- Do not let an AI agent run this with a password typed into the chat: the chat is exactly where the password must not go.
 
 ## `list`
 
@@ -511,6 +553,28 @@ Deletes a profile from the credentials file. `-y` skips the confirmation.
 ## `edit`
 
 Opens the credentials file in `$VISUAL`, `$EDITOR`, or the operating system's default editor, creating it first if needed.
+
+Without a desktop (over SSH, in CI or in a container on Linux) and without `$VISUAL` / `$EDITOR`, it prints the file's path and exits with code 1. Run `EDITOR=nano npx autologin-mcp edit`, or add profiles with `add`.
+
+## `print-config`
+
+Prints the MCP server entry for an agent other than Claude Code, pinned to this version. The configuration goes to stdout, so you can redirect it; where to put it, the client's own add command and notes go to stderr.
+
+```bash
+npx autologin-mcp print-config --client hermes
+```
+
+| `--client` | Agent | Format |
+|---|---|---|
+| `json` (default) | Any client with the common `mcpServers` JSON | JSON |
+| `claude-desktop` | Claude Desktop | JSON, `claude_desktop_config.json` |
+| `cursor` | Cursor | JSON, `~/.cursor/mcp.json` |
+| `vscode` | VS Code (GitHub Copilot) | JSON `servers`, `.vscode/mcp.json`, plus a `code --add-mcp` command |
+| `gemini` | Gemini CLI | JSON, `~/.gemini/settings.json`, plus a `gemini mcp add` command |
+| `codex` | Codex CLI | TOML, `~/.codex/config.toml`, plus a `codex mcp add` command |
+| `hermes` | Hermes Agent | YAML, `~/.hermes/config.yaml`, plus a `hermes mcp add` command |
+
+For Claude Code use `install`: it also adds the skill, the guard hook and the deny rules. Those are Claude Code features, so with other agents nothing technically stops the agent from reading `~/.autologin-mcp`; deny that folder in the agent's own permission settings if it has them. See [Agents and browser tools](clients.md).
 
 ## Running the server
 
@@ -598,9 +662,29 @@ This is the primary setup, tested end to end on real apps.
 - Bridge mode: the agent passes the `function` field to `evaluate_script`.
 - CDP mode with a shared browser: run chrome-devtools-mcp with `--browserUrl http://127.0.0.1:9222` against the same Chrome as above.
 
+## Puppeteer and tools built on it
+
+- Bridge mode: pass the `expression` field to `page.evaluate` (or to a tool that calls it, such as a Puppeteer MCP server's evaluate tool). `page.evaluate` has no top-level `await`, so the `script` field fails there with `await is not defined`, and the `function` field as a string only returns the function without calling it.
+- CDP mode with a shared browser: `puppeteer.connect({ browserURL: 'http://127.0.0.1:9222' })` with `AUTOLOGIN_CDP_URL` set to the same address.
+
 ## Other MCP clients
 
-The server itself is a standard stdio MCP server, so other clients can start it. Register it with your client's MCP configuration, for example in the common `mcpServers` JSON format:
+The server itself is a standard stdio MCP server, so other agents can start it. `print-config` prints the entry for yours, pinned to the installed version:
+
+```bash
+npx autologin-mcp print-config --client codex     # json (default), claude-desktop, cursor, vscode, gemini, codex, hermes
+```
+
+| Agent | Where the entry goes | Or run |
+|---|---|---|
+| Codex CLI | `~/.codex/config.toml` | `codex mcp add autologin -- npx -y autologin-mcp@1.0.1` |
+| Gemini CLI | `~/.gemini/settings.json` | `gemini mcp add -s user autologin npx -- -y autologin-mcp@1.0.1` |
+| Hermes Agent | `~/.hermes/config.yaml` (`mcp_servers:`) | `hermes mcp add autologin --command npx --args -y autologin-mcp@1.0.1` |
+| VS Code (GitHub Copilot) | `.vscode/mcp.json` or the user `mcp.json` (`servers`) | `code --add-mcp '{"name":"autologin","type":"stdio","command":"npx","args":["-y","autologin-mcp@1.0.1"]}'` |
+| Cursor | `~/.cursor/mcp.json` or `.cursor/mcp.json` | |
+| Claude Desktop | `claude_desktop_config.json` (Settings > Developer > Edit Config) | |
+
+Most of them use the common `mcpServers` JSON format:
 
 ```json
 {
@@ -612,8 +696,8 @@ The server itself is a standard stdio MCP server, so other clients can start it.
 
 Then add profiles with `npx autologin-mcp add`. Keep in mind:
 
-- The `install` command, the skill and the guard hook are for Claude Code only. Other clients get the server's built-in instructions, but not the hook. Use your client's permission settings to keep the agent away from `~/.autologin-mcp`, if it has them.
-- Clients other than Claude Code are not tested yet. Installers for Codex CLI, Gemini CLI and Cursor are on the [roadmap](https://github.com/olgaysezgin/autologin-mcp#roadmap). Reports and pull requests are welcome.
+- The `install` command, the skill and the guard hook are for Claude Code only. Other agents get the server's built-in instructions, but nothing enforces them. Deny `~/.autologin-mcp` in your agent's permission settings, if it has them.
+- Agents other than Claude Code are not tested yet. Reports and pull requests are welcome.
 
 ## Browsers
 
@@ -632,6 +716,14 @@ Then add profiles with `npx autologin-mcp add`. Keep in mind:
 Claude in Chrome reports `Cannot access a chrome-extension:// URL of different extension` or `Detached while handling command`.
 
 Another extension, typically a password manager offering to save the password, took over the tab. **The login itself still ran.** The agent should call `login_status` to get the outcome; the MCP server's instructions tell it to. Reload the tab if the browser tool keeps failing. A separate Chrome profile without password managers avoids the problem.
+
+## `await is not defined` (Puppeteer and similar tools)
+
+The browser tool evaluates a plain script, without top-level `await`, so it cannot run the `script` field. Run the `expression` field instead: it evaluates to a Promise of the login result, which Puppeteer's `page.evaluate` waits for. See [Agents and browser tools](clients.md#puppeteer-and-tools-built-on-it).
+
+## `open_config` or `edit` cannot open an editor
+
+On a machine without a desktop (over SSH, in CI, or in a Linux container), there is no window to open the file in. `open_config` then returns `opened: false` with the file's path, and `edit` prints the path and exits with code 1. Add profiles with `npx autologin-mcp add` (or `--password-stdin` in scripts), or edit the file in a terminal editor: `EDITOR=nano npx autologin-mcp edit`.
 
 ## The agent ran the script twice
 
@@ -712,7 +804,7 @@ Everything in the conversation, including files the agent reads, is sent to the 
 
 ## Which agents and browser tools does it work with?
 
-It is built and tested for Claude Code with Claude in Chrome. It also works with Playwright MCP (`browser_evaluate`) and chrome-devtools-mcp (`evaluate_script`). Other MCP clients can run the server, but the installer, skill and guard hook are Claude Code features today. See [Agents and browser tools](clients.md).
+It is built and tested for Claude Code with Claude in Chrome. It also works with Playwright MCP (`browser_evaluate`), chrome-devtools-mcp (`evaluate_script`) and Puppeteer (`page.evaluate`). Other agents such as Codex CLI, Gemini CLI, Cursor, VS Code, Claude Desktop and Hermes Agent can run the server: `npx autologin-mcp print-config --client <name>` prints their configuration. The installer, skill and guard hook are Claude Code features today. See [Agents and browser tools](clients.md).
 
 ## Do I need to enable Chrome remote debugging?
 

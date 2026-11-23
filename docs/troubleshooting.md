@@ -11,6 +11,14 @@ Claude in Chrome reports `Cannot access a chrome-extension:// URL of different e
 
 Another extension, typically a password manager offering to save the password, took over the tab. **The login itself still ran.** The agent should call `login_status` to get the outcome; the MCP server's instructions tell it to. Reload the tab if the browser tool keeps failing. A separate Chrome profile without password managers avoids the problem.
 
+## `await is not defined` (Puppeteer and similar tools)
+
+The browser tool evaluates a plain script, without top-level `await`, so it cannot run the `script` field. Run the `expression` field instead: it evaluates to a Promise of the login result, which Puppeteer's `page.evaluate` waits for. See [Agents and browser tools](clients.md#puppeteer-and-tools-built-on-it).
+
+## `open_config` or `edit` cannot open an editor
+
+On a machine without a desktop (over SSH, in CI, or in a Linux container), there is no window to open the file in. `open_config` then returns `opened: false` with the file's path, and `edit` prints the path and exits with code 1. Add profiles with `npx autologin-mcp add` (or `--password-stdin` in scripts), or edit the file in a terminal editor: `EDITOR=nano npx autologin-mcp edit`.
+
 ## The agent ran the script twice
 
 That is fine. The second run returns the first run's outcome with the note "This one-time script already ran; this is the outcome of that run." The credentials are not released again.

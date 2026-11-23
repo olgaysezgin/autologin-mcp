@@ -60,6 +60,7 @@ describe('BridgeServer', () => {
     const ticket = await server.issue(profile);
     expect(ticket).toMatchObject({ profile: 'app', expiresInSeconds: 60 });
     expect(ticket.script).toBe(`await (${ticket.function})()`);
+    expect(ticket.expression).toBe(`(${ticket.function})()`);
     expect(ticket.function).not.toContain('s3cret');
     const { base, token } = urls(ticket);
     expect(base).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { agentFunction, agentScript, bridgeLogin, fillerScript, type BridgeCredentials, type BridgeTiming } from '../src/bridge/filler.ts';
+import { agentExpression, agentFunction, agentScript, bridgeLogin, fillerScript, type BridgeCredentials, type BridgeTiming } from '../src/bridge/filler.ts';
 import { autologinInpage } from '../src/inpage.ts';
 
 const TIMING: BridgeTiming = { detectTimeoutMs: 100, verifyTimeoutMs: 200, pollMs: 10, earlyFailAfterMs: 30 };
@@ -165,6 +165,7 @@ describe('scripts', () => {
   it('gives the agent a small loader that resolves with the page result', async () => {
     const fn = agentFunction('http://127.0.0.1:1234', 'TOKEN123');
     expect(agentScript(fn)).toBe(`await (${fn})()`);
+    expect(agentExpression(fn)).toBe(`(${fn})()`);
     expect(fn).not.toContain(CREDS.password);
     const result = await runAgent(() => window.dispatchEvent(new CustomEvent('autologin-mcp:TOKEN123', { detail: { status: 'success' } })));
     expect(result).toEqual({ status: 'success' });

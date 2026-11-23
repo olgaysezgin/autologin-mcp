@@ -29,7 +29,7 @@ autologin-mcp can reach the tab in two ways and picks one automatically.
 ```
 
 1. The agent calls `login` with the tab's URL. autologin-mcp picks the matching profile.
-2. autologin-mcp returns `run_in_page` with a small loader script, in two forms: `script` (an expression, for Claude in Chrome's `javascript_tool`) and `function` (for tools that take a function, such as Playwright MCP's `browser_evaluate` and chrome-devtools-mcp's `evaluate_script`). The loader contains only a one-time URL on `127.0.0.1` that expires after 60 seconds. It never contains a credential.
+2. autologin-mcp returns `run_in_page` with a small loader script, in three forms: `script` (an expression with top-level `await`, for Claude in Chrome's `javascript_tool`), `function` (for tools that take a function, such as Playwright MCP's `browser_evaluate` and chrome-devtools-mcp's `evaluate_script`) and `expression` (a Promise expression without top-level `await`, for Puppeteer's `page.evaluate`). The loader contains only a one-time URL on `127.0.0.1` that expires after 60 seconds. It never contains a credential.
 3. The agent runs the loader in the tab with the JavaScript tool it already has.
 4. The page loads the form filler from `127.0.0.1` and asks for the credentials. The bridge releases them only if the request's `Origin` header belongs to the profile's root URL. Browsers set this header themselves and page scripts cannot change it, so a page on another site gets nothing.
 5. The filler fills the form, submits it, waits for the outcome and returns it to the agent: `success`, `submitted`, `failed` with the page's error message, or `no_login_form`. It also reports the outcome to autologin-mcp.

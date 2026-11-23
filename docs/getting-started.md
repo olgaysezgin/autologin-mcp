@@ -50,6 +50,12 @@ npx autologin-mcp add
 
 The profile is saved in `~/.autologin-mcp/credentials.env` with file permissions `600`. You can add as many profiles as you like, including several accounts for the same app (for example `admin` and `viewer`). [Configuration](configuration.md) describes the file format.
 
+In a script or CI job, pipe the password in instead of typing it:
+
+```bash
+printf '%s' "$STAGING_PASSWORD" | npx autologin-mcp add staging --url staging.example.com --username qa@example.com --password-stdin -y
+```
+
 Check what the agent will see:
 
 ```bash

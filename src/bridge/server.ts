@@ -5,7 +5,7 @@ import { FailureLimiter } from '../ratelimit.js';
 import type { NoFormContext } from '../results.js';
 import { matchesUrl } from '../store/match.js';
 import type { UsableProfile } from '../store/profiles.js';
-import { agentFunction, agentScript, fillerScript, type BridgeResult, type BridgeTiming } from './filler.js';
+import { agentExpression, agentFunction, agentScript, fillerScript, type BridgeResult, type BridgeTiming } from './filler.js';
 
 export const BRIDGE_TIMING: BridgeTiming = { detectTimeoutMs: 5_000, verifyTimeoutMs: 10_000, pollMs: 250, earlyFailAfterMs: 1_500 };
 
@@ -14,8 +14,10 @@ export interface BridgeTicket {
   expiresInSeconds: number;
   /** Function form, e.g. for Playwright MCP browser_evaluate / chrome-devtools-mcp evaluate_script. */
   function: string;
-  /** Expression form, e.g. for Claude in Chrome javascript_tool. */
+  /** Expression form with top-level await, e.g. for Claude in Chrome javascript_tool. */
   script: string;
+  /** Promise expression without top-level await, e.g. for Puppeteer page.evaluate. */
+  expression: string;
 }
 
 export interface BridgeOptions {
@@ -100,7 +102,7 @@ export class BridgeServer {
     const token = randomBytes(24).toString('base64url');
     this.tickets.set(token, { profile, expiresAt: now + this.ttlMs, released: false, result: null, waiters: [] });
     const fn = agentFunction(base, token);
-    return { profile: profile.name, expiresInSeconds: Math.round(this.ttlMs / 1000), function: fn, script: agentScript(fn) };
+    return { profile: profile.name, expiresInSeconds: Math.round(this.ttlMs / 1000), function: fn, script: agentScript(fn), expression: agentExpression(fn) };
   }
 
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {

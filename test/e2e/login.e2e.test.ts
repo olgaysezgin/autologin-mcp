@@ -211,9 +211,11 @@ describe('MCP server end to end', () => {
     const login = await client.callTool({ name: 'login', arguments: { url: tab.url() } });
     const text = (login.content as Array<{ text: string }>)[0]!.text;
     expect(text).not.toContain(VALID.password);
-    const body = JSON.parse(text) as { status: string; function: string };
+    const body = JSON.parse(text) as { status: string; script: string; expression: string };
     expect(body.status).toBe('run_in_page');
-    expect(await tab.evaluate(`(${body.function})()`)).toMatchObject({ status: 'success' });
+    // Puppeteer's page.evaluate has no top-level await: `script` fails there, `expression` is the form it takes.
+    await expect(tab.evaluate(body.script)).rejects.toThrow('await is not defined');
+    expect(await tab.evaluate(body.expression)).toMatchObject({ status: 'success' });
     expect(app.received.at(-1)).toEqual(VALID);
     await vi.waitFor(async () => {
       const status = await client.callTool({ name: 'login_status', arguments: { profile: 'app' } });

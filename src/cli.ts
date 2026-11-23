@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
+import { clientConfig, CLIENTS } from './clients.js';
 import { createExec, type ExecFn } from './exec.js';
 import { install, uninstall } from './installer.js';
 import { openDetached, openInEditor, type SpawnFn } from './opener.js';
@@ -39,11 +40,16 @@ Usage:
                                        (--package: what npx runs, e.g. a local .tgz to test a build)
   npx autologin-mcp uninstall [-y] [--dry-run] [--purge]
                                        Undo install (--purge also deletes your credentials file)
-  npx autologin-mcp add [name] [--url <root-url>] [--username <user>]
+  npx autologin-mcp add [name] [--url <root-url>] [--username <user>] [-y]
                                        Add or replace a login profile (the password is asked hidden)
+  npx autologin-mcp add <name> --url <root-url> --username <user> --password-stdin [-y]
+                                       Same, with the password piped in (scripts, CI)
   npx autologin-mcp list               List profiles (passwords are never shown)
   npx autologin-mcp remove <name> [-y] Delete a profile
   npx autologin-mcp edit               Open the credentials file in $VISUAL / $EDITOR or the default editor
+  npx autologin-mcp print-config [--client <name>] [--package <spec>]
+                                       Print the MCP server config for another agent: json (default),
+                                       claude-desktop, cursor, vscode, gemini, codex or hermes
   npx autologin-mcp --version | --help
 
 Credentials file: ~/.autologin-mcp/credentials.env (override the folder with AUTOLOGIN_HOME).
@@ -53,11 +59,25 @@ Run add/edit in a separate terminal, never inside an AI chat.
 export interface ParsedArgs {
   command: string;
   positionals: string[];
-  flags: { yes: boolean; dryRun: boolean; purge: boolean; help: boolean; version: boolean; url?: string; username?: string; package?: string };
+  flags: {
+    yes: boolean;
+    dryRun: boolean;
+    purge: boolean;
+    help: boolean;
+    version: boolean;
+    passwordStdin: boolean;
+    url?: string;
+    username?: string;
+    package?: string;
+    client?: string;
+  };
 }
 
+export const NO_PASSWORD_FLAG =
+  '--password is not supported: it would leave the password in your shell history and the process list. Pipe it in with --password-stdin instead.';
+
 export function parseArgs(argv: string[]): ParsedArgs {
-  const flags: ParsedArgs['flags'] = { yes: false, dryRun: false, purge: false, help: false, version: false };
+  const flags: ParsedArgs['flags'] = { yes: false, dryRun: false, purge: false, help: false, version: false, passwordStdin: false };
   const positionals: string[] = [];
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]!;
@@ -67,10 +87,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
     else if (name === '--purge') flags.purge = true;
     else if (name === '-h' || name === '--help') flags.help = true;
     else if (name === '-v' || name === '--version') flags.version = true;
-    else if (name === '--url' || name === '--username' || name === '--package') {
+    else if (name === '--password-stdin') flags.passwordStdin = true;
+    else if (name === '--password') throw new Error(NO_PASSWORD_FLAG);
+    else if (name === '--url' || name === '--username' || name === '--package' || name === '--client') {
       const value = inline ?? argv[++i];
       if (value === undefined) throw new Error(`${name} needs a value`);
-      flags[name.slice(2) as 'url' | 'username' | 'package'] = value;
+      flags[name.slice(2) as 'url' | 'username' | 'package' | 'client'] = value;
     } else if (name.startsWith('-')) throw new Error(`Unknown option ${name}`);
     else positionals.push(arg);
   }
@@ -101,21 +123,74 @@ function credentialsFile(ctx: CliContext): string {
   return credentialsPath(resolveConfigDir(ctx.env, ctx.home));
 }
 
+const invalidName = (name: string): string | null =>
+  PROFILE_NAME_RE.test(name) && !name.toUpperCase().startsWith(SETTINGS_PREFIX)
+    ? null
+    : `Invalid profile name "${name}": use letters, digits and _ (not starting with ${SETTINGS_PREFIX.toLowerCase()}).`;
+
+/** Writes the profile, replacing an existing one with the same name. Returns an error message or null. */
+async function saveProfile(ctx: CliContext, file: string, profile: { name: string; url: string; username: string; password: string }, exists: boolean): Promise<string | null> {
+  let block: string;
+  try {
+    block = renderProfile(profile);
+  } catch (error) {
+    return (error as Error).message;
+  }
+  const current = (await readText(file)) ?? ENV_TEMPLATE;
+  const base = exists ? removeProfile(current, profile.name).text : current;
+  await writeSecureFile(file, appendBlock(base, block));
+  line(ctx.stdout, `✓ Saved profile "${profile.name}" (${profile.url}) to ${file}`);
+  line(ctx.stdout, '  The password is stored only in this file and is never shown to the AI.');
+  return null;
+}
+
+async function readAll(stream: Readable): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk as Buffer | string));
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+export const STDIN_EXAMPLE = `printf '%s' "$PASSWORD" | npx autologin-mcp add staging --url staging.example.com --username qa@example.com --password-stdin`;
+
+/** `add --password-stdin`: no questions, for scripts and CI (like `docker login --password-stdin`). */
+async function addFromStdin(ctx: CliContext, args: ParsedArgs, file: string, fail: (text: string) => number): Promise<number> {
+  const name = args.positionals[0]?.toLowerCase();
+  const { url, username } = args.flags;
+  if (name === undefined || url === undefined || username === undefined) {
+    return fail(`--password-stdin needs the profile name, --url and --username, for example:\n  ${STDIN_EXAMPLE}`);
+  }
+  if (ctx.stdin.isTTY === true) return fail('--password-stdin reads the password from a pipe, not from the keyboard. Leave it out to type the password hidden.');
+  const nameError = invalidName(name);
+  if (nameError !== null) return fail(nameError);
+  const parsed = parseRootUrl(url);
+  if (!parsed.ok) return fail(parsed.error);
+  if (username === '') return fail('A username is required.');
+  // One trailing newline (from echo or a here-string) is not part of the password.
+  const password = (await readAll(ctx.stdin)).replace(/\r?\n$/, '');
+  if (password === '') return fail('A password is required: nothing was piped in.');
+  if (/[\r\n]/.test(password)) return fail('The password must be a single line.');
+  const store = await loadStore(file);
+  const exists = store.profiles.some((p) => p.name === name);
+  if (exists && !args.flags.yes) return fail(`Profile "${name}" already exists. Add -y to replace it.`);
+  const error = await saveProfile(ctx, file, { name, url: parsed.normalized, username, password }, exists);
+  return error === null ? 0 : fail(error);
+}
+
 async function addCommand(ctx: CliContext, args: ParsedArgs): Promise<number> {
   const file = credentialsFile(ctx);
-  const prompter = ctx.prompter(ctx.stdin, ctx.stdout);
   const fail = (text: string): number => {
     line(ctx.stderr, text);
     return 1;
   };
+  if (args.flags.passwordStdin) return addFromStdin(ctx, args, file, fail);
+  const prompter = ctx.prompter(ctx.stdin, ctx.stdout);
   try {
     const store = await loadStore(file);
     const name = (args.positionals[0] ?? (await prompter.ask('Profile name (e.g. staging): '))).toLowerCase();
-    if (!PROFILE_NAME_RE.test(name) || name.toUpperCase().startsWith(SETTINGS_PREFIX)) {
-      return fail(`Invalid profile name "${name}": use letters, digits and _ (not starting with ${SETTINGS_PREFIX.toLowerCase()}).`);
-    }
+    const nameError = invalidName(name);
+    if (nameError !== null) return fail(nameError);
     const exists = store.profiles.some((p) => p.name === name);
-    if (exists && !(await prompter.confirm(`Profile "${name}" already exists. Replace it?`, false))) return fail('Cancelled.');
+    if (exists && !args.flags.yes && !(await prompter.confirm(`Profile "${name}" already exists. Replace it?`, false))) return fail('Cancelled.');
 
     const urlInput = args.flags.url ?? (await prompter.ask('Root URL (e.g. example.com or localhost:3000): '));
     const parsed = parseRootUrl(urlInput);
@@ -128,18 +203,8 @@ async function addCommand(ctx: CliContext, args: ParsedArgs): Promise<number> {
     if (password === '') return fail('A password is required.');
     if ((await prompter.askHidden('Repeat the password: ')) !== password) return fail('The passwords do not match.');
 
-    let block: string;
-    try {
-      block = renderProfile({ name, url: parsed.normalized, username, password });
-    } catch (error) {
-      return fail((error as Error).message);
-    }
-    const current = (await readText(file)) ?? ENV_TEMPLATE;
-    const base = exists ? removeProfile(current, name).text : current;
-    await writeSecureFile(file, appendBlock(base, block));
-    line(ctx.stdout, `✓ Saved profile "${name}" (${parsed.normalized}) to ${file}`);
-    line(ctx.stdout, '  The password is stored only in this file and is never shown to the AI.');
-    return 0;
+    const error = await saveProfile(ctx, file, { name, url: parsed.normalized, username, password }, exists);
+    return error === null ? 0 : fail(error);
   } catch (error) {
     if (error instanceof InputClosedError) return fail(error.message);
     throw error;
@@ -192,10 +257,49 @@ async function editCommand(ctx: CliContext): Promise<number> {
   if (await ensureEnvFile(file)) line(ctx.stdout, `Created ${file}`);
   const editor = ctx.env.VISUAL?.trim() || ctx.env.EDITOR?.trim();
   if (editor) return openInEditor(file, editor, ctx.spawn);
-  await openDetached(file, ctx.platform, ctx.spawn);
+  try {
+    await openDetached(file, ctx.platform, { spawn: ctx.spawn, env: ctx.env });
+  } catch (error) {
+    line(ctx.stderr, `Could not open an editor (${(error as Error).message}).`);
+    line(ctx.stderr, `Set one for this command, e.g. EDITOR=nano npx autologin-mcp edit, or open ${file} yourself.`);
+    line(ctx.stderr, 'To add a profile without an editor: npx autologin-mcp add');
+    return 1;
+  }
   line(ctx.stdout, `Opened ${file} in your default editor.`);
   return 0;
 }
+
+/** `~/...` for a path inside the home folder, for messages. */
+function displayPath(target: string, home: string): string {
+  const rel = path.relative(home, target);
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel) ? `~/${rel.split(path.sep).join('/')}` : target;
+}
+
+/** Prints the MCP server entry for a client other than Claude Code: the config on stdout, the notes on stderr. */
+function printConfigCommand(ctx: CliContext, args: ParsedArgs): number {
+  const id = (args.flags.client ?? 'json').toLowerCase();
+  const config = clientConfig(id, packageSpec(args.flags.package));
+  if (config === null) {
+    line(ctx.stderr, `Unknown client "${id}". Choose one of: ${CLIENTS.join(', ')}.`);
+    line(ctx.stderr, 'For Claude Code, run "npx autologin-mcp install": it also adds the skill and the guard hook.');
+    return 1;
+  }
+  ctx.stdout.write(config.snippet);
+  const dir = displayPath(resolveConfigDir(ctx.env, ctx.home), ctx.home);
+  line(ctx.stderr);
+  line(ctx.stderr, `Add this to ${config.where}.`);
+  if (config.command) line(ctx.stderr, `Or run: ${config.command}`);
+  if (config.note) line(ctx.stderr, config.note);
+  line(ctx.stderr, 'Then add a login profile in a terminal, never in the AI chat: npx autologin-mcp add');
+  line(ctx.stderr, '');
+  line(ctx.stderr, `! Only Claude Code has the guard hook that keeps the agent out of ${dir}.`);
+  line(ctx.stderr, `  ${config.name === 'your MCP client' ? 'Your client' : config.name} gets the server's instruction not to read that folder, but nothing enforces it;`);
+  line(ctx.stderr, "  deny the folder in the client's permission settings if it has them.");
+  line(ctx.stderr, `  Tested with Claude Code; reports for other clients: ${ISSUES_URL}`);
+  return 0;
+}
+
+export const ISSUES_URL = 'https://github.com/olgaysezgin/autologin-mcp/issues';
 
 /**
  * A local path (e.g. ./autologin-mcp-1.0.0.tgz) becomes an absolute `file:` spec:
@@ -272,6 +376,8 @@ export async function main(argv: string[], overrides: Partial<CliContext> = {}):
         return await removeCommand(ctx, args);
       case 'edit':
         return await editCommand(ctx);
+      case 'print-config':
+        return printConfigCommand(ctx, args);
       default:
         line(ctx.stderr, `Unknown command "${args.command}".\n`);
         line(ctx.stderr, USAGE);

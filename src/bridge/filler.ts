@@ -154,5 +154,12 @@ export function agentFunction(base: string, token: string): string {
   );
 }
 
-/** Expression form, for REPL-style tools such as Claude in Chrome's javascript_tool. */
+/** Expression form with top-level await, for REPL-style tools such as Claude in Chrome's javascript_tool. */
 export const agentScript = (fn: string): string => `await (${fn})()`;
+
+/**
+ * Expression form without top-level await: it evaluates to a Promise of the result, for tools that
+ * evaluate a plain script and wait for its value (Puppeteer page.evaluate, CDP Runtime.evaluate with awaitPromise).
+ * There, `await (...)()` fails with "await is not defined".
+ */
+export const agentExpression = (fn: string): string => `(${fn})()`;

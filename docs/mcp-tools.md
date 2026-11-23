@@ -41,11 +41,20 @@ Logs the tab under test into its app.
   "hint": "Run `script` unchanged in the tab that shows the login form ...",
   "expires_in_s": 60,
   "script": "await (async () => ...)()",
-  "function": "async () => ..."
+  "function": "async () => ...",
+  "expression": "(async () => ...)()"
 }
 ```
 
-The agent runs `script` (Claude in Chrome `javascript_tool`) or `function` (Playwright MCP `browser_evaluate`, chrome-devtools-mcp `evaluate_script`) **unchanged** in the tab. The value it returns is the login result below. The script works once, within 60 seconds, and only on a page of the profile's site.
+The agent runs one of the three forms of the same loader **unchanged** in the tab:
+
+| Field | Form | For |
+|---|---|---|
+| `script` | Expression with top-level `await` | Tools with REPL semantics: Claude in Chrome `javascript_tool` |
+| `function` | Function source | Tools that take a function: Playwright MCP `browser_evaluate`, chrome-devtools-mcp `evaluate_script` |
+| `expression` | Expression that evaluates to a Promise, without top-level `await` | Tools that evaluate a plain script and wait for its value: Puppeteer `page.evaluate`, CDP `Runtime.evaluate` with `awaitPromise` |
+
+The value it returns is the login result below. The script works once, within 60 seconds, and only on a page of the profile's site.
 
 **In CDP mode** it fills the tab itself and returns the login result directly.
 
@@ -101,12 +110,22 @@ Outcomes are kept in memory for the lifetime of the MCP server process.
 
 ## `open_config`
 
-Creates the credentials file if needed and opens it in the user's editor, so they can add or change profiles themselves. The file content is never returned. If no editor can be opened, the result asks the user to run `npx autologin-mcp edit`.
+Creates the credentials file if needed and opens it in the user's editor, so they can add or change profiles themselves. The file content is never returned.
+
+Where no editor can be opened (no desktop over SSH, in CI or in a Linux container, or the opener fails right away), the result says so instead of claiming success, and gives the agent the file's path to pass on:
+
+```json
+{
+  "file": "/home/you/.autologin-mcp/credentials.env",
+  "opened": false,
+  "hint": "Could not open an editor here (there is no desktop session here ...). Ask the user to run \"npx autologin-mcp add\" in a separate terminal (never in this chat), or to open this file in a text editor there. Do not read this file."
+}
+```
 
 ## Server instructions
 
 The server sends these instructions to the MCP client at startup, so even an agent with no skill or memory knows when to use it:
 
 - When a page under test shows a login form, a "session expired" message, a 401/403, or redirects to a login URL, call `login`, then continue the task.
-- If `login` returns `run_in_page`, run `script` unchanged in the tab; if that call fails or returns nothing, call `login_status`.
+- If `login` returns `run_in_page`, run `script` unchanged in the tab (or `function` / `expression`, depending on the browser tool); if that call fails or returns nothing, call `login_status`.
 - Never ask the user for a password, never type credentials into a page, never read files under `~/.autologin-mcp`, never modify the login script, and do not inspect the login request body or read password field values.

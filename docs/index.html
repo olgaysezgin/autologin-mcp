@@ -88,16 +88,18 @@
           { "@type": "Thing", "name": "Model Context Protocol", "sameAs": ["https://modelcontextprotocol.io", "https://en.wikipedia.org/wiki/Model_Context_Protocol"] },
           { "@type": "Thing", "name": "Browser test automation with AI coding agents" }
         ],
-        "keywords": "MCP server, Model Context Protocol, Claude Code, AI agent login, auto-login, session expired, browser testing, Claude in Chrome, Playwright MCP, chrome-devtools-mcp, credentials, QA",
+        "keywords": "MCP server, Model Context Protocol, Claude Code, AI agent login, auto-login, session expired, browser testing, Claude in Chrome, Playwright MCP, chrome-devtools-mcp, Puppeteer, Codex CLI, Gemini CLI, Cursor, Hermes Agent, credentials, QA",
         "featureList": [
           "Logs the agent's browser tab into the app under test when a login form or an expired session appears",
           "Passwords stay in a local file and never enter the model context",
           "Bridge mode with no browser setup: a one-time 127.0.0.1 script, credentials released only to the profile's origin",
           "CDP mode through Chrome remote debugging",
-          "Works with Claude in Chrome, Playwright MCP and chrome-devtools-mcp",
+          "Works with Claude in Chrome, Playwright MCP, chrome-devtools-mcp and Puppeteer",
           "Guard hook and deny rules that keep the agent away from the credentials file",
           "Rate limiting that prevents account lockouts",
-          "Several accounts per app"
+          "Several accounts per app",
+          "print-config for Codex CLI, Gemini CLI, Cursor, VS Code, Claude Desktop and Hermes Agent",
+          "Profiles from scripts and CI with add --password-stdin"
         ],
         "sameAs": [
           "https://github.com/olgaysezgin/autologin-mcp",
@@ -149,7 +151,7 @@
           {
             "@type": "Question",
             "name": "Which agents and browser tools does autologin-mcp work with?",
-            "acceptedAnswer": { "@type": "Answer", "text": "It is built and tested for Claude Code with Claude in Chrome, and also works with Playwright MCP and chrome-devtools-mcp. Other MCP clients can run the stdio server; the installer, skill and guard hook are Claude Code features today." }
+            "acceptedAnswer": { "@type": "Answer", "text": "It is built and tested for Claude Code with Claude in Chrome, and also works with Playwright MCP, chrome-devtools-mcp and Puppeteer. Codex CLI, Gemini CLI, Cursor, VS Code, Claude Desktop and Hermes Agent can run the stdio server, and npx autologin-mcp print-config prints their configuration; the installer, skill and guard hook are Claude Code features today." }
           },
           {
             "@type": "Question",
@@ -422,7 +424,7 @@
           </article>
         </div>
         <ul class="chips">
-          <li data-reveal>Claude Code</li><li data-reveal>Google Chrome</li><li data-reveal>CDP mode: no JavaScript tool needed</li><li data-reveal>Any stdio MCP client (manual setup)</li>
+          <li data-reveal>Claude Code</li><li data-reveal>Google Chrome</li><li data-reveal>Puppeteer: the <code>expression</code> field</li><li data-reveal>CDP mode: no JavaScript tool needed</li><li data-reveal>Codex CLI, Gemini CLI, Cursor, VS Code, Hermes Agent: <code>print-config</code></li>
         </ul>
         <p data-reveal class="qs-links"><a href="clients.html">Setup per agent and browser tool</a></p>
       </div>
@@ -497,7 +499,7 @@
           <details data-reveal open><summary>How do I let Claude Code log in to my web app without giving it my password?</summary><p>Install autologin-mcp with <code>npx autologin-mcp install</code> and add a login profile in a normal terminal with <code>npx autologin-mcp add</code>. When Claude Code's browser tab shows a login form, Claude calls the <code>login</code> tool and autologin-mcp fills the form with the credentials stored on your machine. Claude only sees the outcome, never the password.</p></details>
           <details data-reveal><summary>What happens when my session expires while an AI agent is testing my app?</summary><p>Without autologin-mcp the agent stops or asks you for the password. With autologin-mcp it notices the login form, session-expired message, 401/403 or login redirect, calls <code>login</code>, and continues the task where it left off.</p></details>
           <details data-reveal><summary>Does the password ever reach the AI model?</summary><p>No. The password goes from a local credentials file directly into the page, over a one-time 127.0.0.1 bridge that checks the page's origin or through the Chrome DevTools Protocol. Tool results are redacted, and a guard hook blocks the agent from reading the credentials file.</p></details>
-          <details data-reveal><summary>Which agents and browser tools does autologin-mcp work with?</summary><p>It is built and tested for Claude Code with Claude in Chrome, and also works with Playwright MCP and chrome-devtools-mcp. Other MCP clients can run the stdio server; the installer, skill and guard hook are Claude Code features today.</p></details>
+          <details data-reveal><summary>Which agents and browser tools does autologin-mcp work with?</summary><p>It is built and tested for Claude Code with Claude in Chrome, and also works with Playwright MCP, chrome-devtools-mcp and Puppeteer. Codex CLI, Gemini CLI, Cursor, VS Code, Claude Desktop and Hermes Agent can run the stdio server, and <code>npx autologin-mcp print-config</code> prints their configuration; the installer, skill and guard hook are Claude Code features today.</p></details>
           <details data-reveal><summary>Do I need to enable Chrome remote debugging?</summary><p>No. The default bridge mode needs no browser setup. Remote debugging enables CDP mode, which helps when the app's Content-Security-Policy blocks the bridge.</p></details>
           <details data-reveal><summary>Can a malicious page trick the agent into sending my credentials to it?</summary><p>A profile only fills pages whose host matches its root URL. The bridge checks the Origin header that the browser sets and page scripts cannot fake, and CDP mode reads the tab's URL from Chrome. A page on another site receives nothing.</p></details>
           <details data-reveal><summary>Does autologin-mcp support SSO, two-factor authentication or multi-step logins?</summary><p>Not yet. It handles the common username and password form on the app's own page, including React, Vue and Angular forms. Multi-step logins, iframes, SSO login hosts and TOTP codes are on the roadmap.</p></details>

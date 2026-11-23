@@ -20,7 +20,10 @@ afterEach(async () => {
 
 const fakeSpawn = (() => {
   const child = Object.assign(new EventEmitter(), { unref: vi.fn() });
-  setImmediate(() => child.emit('spawn'));
+  setImmediate(() => {
+    child.emit('spawn');
+    child.emit('exit', 0);
+  });
   return child;
 }) as unknown as SpawnFn;
 
@@ -32,11 +35,14 @@ describe('createDefaultDeps', () => {
   });
 
   it('reads the store, creates and opens the file, and reports a missing browser', async () => {
-    const { deps, browser } = createDefaultDeps({ env: { AUTOLOGIN_HOME: dir }, home: dir, platform: 'linux', spawn: fakeSpawn });
+    const { deps, browser } = createDefaultDeps({ env: { AUTOLOGIN_HOME: dir, DISPLAY: ':0' }, home: dir, platform: 'linux', spawn: fakeSpawn });
     expect(deps.configFile).toBe(path.join(dir, 'credentials.env'));
     expect((await deps.loadStore()).exists).toBe(false);
     expect(await deps.openConfig()).toEqual({ created: true });
     expect(await deps.openConfig()).toEqual({ created: false });
+    const headless = createDefaultDeps({ env: { AUTOLOGIN_HOME: dir }, home: dir, platform: 'linux', spawn: fakeSpawn });
+    await expect(headless.deps.openConfig()).rejects.toThrow('no desktop session');
+    await headless.browser.dispose();
     await expect(deps.getBrowser()).rejects.toThrow(/remote debugging/);
     await browser.dispose();
   });

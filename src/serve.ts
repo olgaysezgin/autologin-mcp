@@ -54,7 +54,7 @@ export function createDefaultDeps(options: ServeOptions = {}): { deps: ServerDep
     bridge,
     openConfig: async () => {
       const created = await ensureEnvFile(file);
-      await openDetached(file, platform, options.spawn);
+      await openDetached(file, platform, { spawn: options.spawn, env });
       return { created };
     },
     limiter,

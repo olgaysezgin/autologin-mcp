@@ -7,9 +7,9 @@ description: The autologin-mcp credentials file explained - login profiles, root
 
 All configuration lives in one file per user: `~/.autologin-mcp/credentials.env`. It is global on purpose. It sits outside your projects, so it never ends up in git, and the same profiles work in every project.
 
-- `npx autologin-mcp add` creates the file and adds profiles for you, with permissions `600` (only your user can read it).
+- `npx autologin-mcp add` creates the file and adds profiles for you, with permissions `600` (only your user can read it). In scripts and CI, `add --password-stdin` takes the password from a pipe (see [CLI reference](cli.md#scripts-and-ci---password-stdin)).
 - `npx autologin-mcp edit` opens it in `$VISUAL`, `$EDITOR` or your default editor.
-- The agent can ask you to edit it with the `open_config` tool. The tool opens the file in your editor and never returns its content.
+- The agent can ask you to edit it with the `open_config` tool. The tool opens the file in your editor and never returns its content. Without a desktop (SSH, CI, a container) it returns the file's path instead, for you to edit it in a terminal.
 
 Edit the file yourself, in a terminal or an editor, never through the AI chat.
 
@@ -106,6 +106,7 @@ A separate Chrome profile without password managers also avoids extensions that 
 |---|---|
 | `AUTOLOGIN_HOME` | Use this folder instead of `~/.autologin-mcp` for the credentials file |
 | `VISUAL`, `EDITOR` | Editor used by `npx autologin-mcp edit` |
+| `DISPLAY`, `WAYLAND_DISPLAY` | On Linux, `edit` and `open_config` open a desktop editor only when one of these is set |
 | `CHROME_PATH` | Chrome binary for the end-to-end tests (development only) |
 
 The values in the credentials file are parsed in memory. They are never copied into `process.env`, so child processes and error reports cannot pick them up.

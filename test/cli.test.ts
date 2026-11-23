@@ -5,7 +5,7 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { parse } from 'dotenv';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { defaultContext, main, packageSpec, parseArgs, USAGE, type CliContext } from '../src/cli.ts';
+import { defaultContext, main, NO_PASSWORD_FLAG, packageSpec, parseArgs, STDIN_EXAMPLE, USAGE, type CliContext } from '../src/cli.ts';
 import type { ExecFn } from '../src/exec.ts';
 import type { SpawnFn } from '../src/opener.ts';
 import { InputClosedError, type Prompter } from '../src/prompt.ts';
@@ -69,6 +69,17 @@ function ctx(overrides: Partial<CliContext> = {}, answers: Array<string | boolea
 
 const tty = () => Object.assign(new PassThrough(), { isTTY: true });
 
+/** stdin with `text` piped in, as in `printf '%s' "$PASSWORD" | npx autologin-mcp add ...`. */
+function piped(text: string) {
+  const stream = Object.assign(new PassThrough(), { isTTY: false });
+  stream.end(text);
+  return stream;
+}
+
+const noPrompts = () => {
+  throw new Error('--password-stdin must not prompt');
+};
+
 function spawnEmitting(event: 'spawn' | 'exit', payload?: unknown) {
   return vi.fn(() => {
     const child = Object.assign(new EventEmitter(), { unref: vi.fn() });
@@ -82,8 +93,9 @@ describe('parseArgs', () => {
     expect(parseArgs(['add', 'staging', '--url', 'x.test', '--username=me', '-y'])).toEqual({
       command: 'add',
       positionals: ['staging'],
-      flags: { yes: true, dryRun: false, purge: false, help: false, version: false, url: 'x.test', username: 'me' },
+      flags: { yes: true, dryRun: false, purge: false, help: false, version: false, passwordStdin: false, url: 'x.test', username: 'me' },
     });
+    expect(parseArgs(['add', 'app', '--password-stdin']).flags.passwordStdin).toBe(true);
     expect(parseArgs(['uninstall', '--yes', '--dry-run', '--purge', '-h', '-v']).flags).toMatchObject({ yes: true, dryRun: true, purge: true, help: true, version: true });
     expect(parseArgs([]).command).toBe('');
   });
@@ -91,6 +103,8 @@ describe('parseArgs', () => {
   it('rejects unknown options and missing values', () => {
     expect(() => parseArgs(['add', '--url'])).toThrow('--url needs a value');
     expect(() => parseArgs(['--nope'])).toThrow('Unknown option --nope');
+    expect(() => parseArgs(['add', 'app', '--password', 'hunter2'])).toThrow(NO_PASSWORD_FLAG);
+    expect(() => parseArgs(['add', 'app', '--password=hunter2'])).toThrow(NO_PASSWORD_FLAG);
   });
 });
 
@@ -224,6 +238,105 @@ describe('add', () => {
     expect(await main(['add', 'app'], ctx())).toBe(1);
     expect(err).toMatch(/^Error: /);
   });
+
+  it('replaces an existing profile without asking with -y', async () => {
+    await main(['add', 'local', '--url', 'localhost:3000', '--username', 'admin'], ctx({}, ['one', 'one']));
+    expect(await main(['add', 'local', '--url', 'localhost:3000', '--username', 'root', '-y'], ctx({}, ['two', 'two']))).toBe(0);
+    expect(parse(await fs.readFile(file, 'utf8'))).toMatchObject({ LOCAL_USERNAME: 'root', LOCAL_PASSWORD: 'two' });
+  });
+});
+
+describe('print-config', () => {
+  it('prints only the config on stdout and the notes on stderr, pinned to this version', async () => {
+    expect(await main(['print-config'], ctx())).toBe(0);
+    expect(JSON.parse(out)).toEqual({ mcpServers: { autologin: { command: 'npx', args: ['-y', `autologin-mcp@${VERSION}`] } } });
+    expect(err).toContain("Add this to your client's MCP configuration");
+    expect(err).toContain('npx autologin-mcp add');
+    expect(err).toContain('Only Claude Code has the guard hook that keeps the agent out of ~/.autologin-mcp.');
+    expect(err).toContain('Your client gets the server');
+    expect(err).toContain('https://github.com/olgaysezgin/autologin-mcp/issues');
+  });
+
+  it('prints a named client, with its add command and notes', async () => {
+    expect(await main(['print-config', '--client', 'Hermes'], ctx())).toBe(0);
+    expect(out).toBe(`mcp_servers:\n  autologin:\n    command: "npx"\n    args: ["-y", "autologin-mcp@${VERSION}"]\n`);
+    expect(err).toContain('Add this to ~/.hermes/config.yaml');
+    expect(err).toContain(`Or run: hermes mcp add autologin --command npx --args -y autologin-mcp@${VERSION}`);
+    expect(err).toContain('/reload-mcp');
+    expect(err).toContain('Hermes Agent gets the server');
+  });
+
+  it('shows a credentials folder outside the home folder as is, and takes --package', async () => {
+    const tgz = path.join(home, 'autologin-mcp-9.9.9.tgz');
+    await fs.writeFile(tgz, '');
+    const elsewhere = path.join(os.tmpdir(), 'elsewhere');
+    expect(await main(['print-config', '--client=codex', '--package', tgz], ctx({ env: { AUTOLOGIN_HOME: elsewhere } }))).toBe(0);
+    expect(out).toContain(`args = ["-y", ${JSON.stringify(`file:${tgz}`)}]`);
+    expect(err).toContain(`keeps the agent out of ${elsewhere}.`);
+  });
+
+  it('rejects an unknown client and points Claude Code users to install', async () => {
+    expect(await main(['print-config', '--client', 'claude'], ctx())).toBe(1);
+    expect(out).toBe('');
+    expect(err).toContain('Unknown client "claude". Choose one of: json, claude-desktop, cursor, vscode, gemini, codex, hermes.');
+    expect(err).toContain('npx autologin-mcp install');
+  });
+});
+
+describe('add --password-stdin', () => {
+  const argv = ['add', 'Staging', '--url', 'https://staging.example.com/login', '--username', 'qa@example.com', '--password-stdin'];
+
+  it('reads the password from a pipe without any question, dropping one trailing newline', async () => {
+    expect(await main(argv, ctx({ stdin: piped(`p'w"#1 é\n`), prompter: noPrompts }))).toBe(0);
+    const text = await fs.readFile(file, 'utf8');
+    expect(parse(text)).toEqual({ STAGING_URL: 'staging.example.com', STAGING_USERNAME: 'qa@example.com', STAGING_PASSWORD: `p'w"#1 é` });
+    if (process.platform !== 'win32') expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
+    expect(out).toContain('✓ Saved profile "staging" (staging.example.com)');
+    expect(out + err).not.toContain("p'w");
+    expect(await main(argv.concat('-y'), ctx({ stdin: piped('crlf\r\n'), prompter: noPrompts }))).toBe(0);
+    expect(parse(await fs.readFile(file, 'utf8')).STAGING_PASSWORD).toBe('crlf');
+  });
+
+  it('replaces an existing profile only with -y', async () => {
+    await main(argv, ctx({ stdin: piped('one') }));
+    expect(await main(argv, ctx({ stdin: piped('two') }))).toBe(1);
+    expect(err).toContain('Profile "staging" already exists. Add -y to replace it.');
+    expect(parse(await fs.readFile(file, 'utf8')).STAGING_PASSWORD).toBe('one');
+    expect(await main([...argv, '-y'], ctx({ stdin: piped('two') }))).toBe(0);
+    expect(parse(await fs.readFile(file, 'utf8')).STAGING_PASSWORD).toBe('two');
+    expect((await fs.readFile(file, 'utf8')).match(/# --- staging ---/g)).toHaveLength(1);
+  });
+
+  it.each([
+    [['add', '--password-stdin'], 'p', `needs the profile name, --url and --username, for example:\n  ${STDIN_EXAMPLE}`],
+    [['add', 'app', '--url', 'x.test', '--password-stdin'], 'p', 'needs the profile name, --url and --username'],
+    [['add', 'bad name', '--url', 'x.test', '--username', 'u', '--password-stdin'], 'p', 'Invalid profile name'],
+    [['add', 'app', '--url', 'not a url', '--username', 'u', '--password-stdin'], 'p', 'Invalid URL'],
+    [['add', 'app', '--url', 'x.test', '--username', '', '--password-stdin'], 'p', 'A username is required.'],
+    [['add', 'app', '--url', 'x.test', '--username', 'u', '--password-stdin'], '', 'nothing was piped in'],
+    [['add', 'app', '--url', 'x.test', '--username', 'u', '--password-stdin'], '\n', 'nothing was piped in'],
+    [['add', 'app', '--url', 'x.test', '--username', 'u', '--password-stdin'], 'one\ntwo\n', 'The password must be a single line.'],
+    [['add', 'app', '--url', 'x.test', '--username', 'u', '--password-stdin'], '\'"`', 'edit the credentials file by hand'],
+  ])('%j with %j piped in fails with %s', async (args, input, message) => {
+    expect(await main(args as string[], ctx({ stdin: piped(input as string), prompter: noPrompts }))).toBe(1);
+    expect(err).toContain(message);
+    await expect(fs.stat(file)).rejects.toThrow();
+  });
+
+  it('refuses a keyboard, since the password would not be hidden', async () => {
+    expect(await main(argv, ctx({ stdin: tty(), prompter: noPrompts }))).toBe(1);
+    expect(err).toContain('reads the password from a pipe, not from the keyboard');
+  });
+
+  it('reads chunked input', async () => {
+    const stdin = Object.assign(new PassThrough(), { isTTY: false });
+    const pending = main(argv, ctx({ stdin, prompter: noPrompts }));
+    stdin.write(Buffer.from('ab'));
+    stdin.write('cd');
+    stdin.end();
+    expect(await pending).toBe(0);
+    expect(parse(await fs.readFile(file, 'utf8')).STAGING_PASSWORD).toBe('abcd');
+  });
 });
 
 describe('list / remove / edit', () => {
@@ -273,9 +386,18 @@ describe('list / remove / edit', () => {
     expect(await main(['edit'], ctx({ env: { EDITOR: 'vim' }, spawn: editor }))).toBe(0);
     expect(editor).toHaveBeenCalledWith('vim', [file], { stdio: 'inherit' });
     expect(out).toContain('Created');
-    const gui = spawnEmitting('spawn');
-    expect(await main(['edit'], ctx({ env: { VISUAL: ' ' }, spawn: gui }))).toBe(0);
+    const gui = spawnEmitting('exit', 0);
+    expect(await main(['edit'], ctx({ env: { VISUAL: ' ', DISPLAY: ':0' }, spawn: gui }))).toBe(0);
     expect(gui).toHaveBeenCalledWith('xdg-open', [file], { detached: true, stdio: 'ignore' });
     expect(out).toContain('Opened');
+  });
+
+  it('explains what to do when no editor can be opened (SSH, CI, containers)', async () => {
+    const gui = spawnEmitting('exit', 0);
+    expect(await main(['edit'], ctx({ spawn: gui }))).toBe(1);
+    expect(gui).not.toHaveBeenCalled();
+    expect(err).toContain('Could not open an editor (there is no desktop session here');
+    expect(err).toContain(`EDITOR=nano npx autologin-mcp edit, or open ${file} yourself`);
+    expect(err).toContain('npx autologin-mcp add');
   });
 });

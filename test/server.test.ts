@@ -32,6 +32,7 @@ const bridge = {
     expiresInSeconds: 60,
     function: `async () => 'run ${profile.name}'`,
     script: `await (async () => 'run ${profile.name}')()`,
+    expression: `(async () => 'run ${profile.name}')()`,
   })),
 };
 
@@ -173,6 +174,7 @@ describe('MCP server', () => {
         expires_in_s: 60,
         script: "await (async () => 'run app')()",
         function: "async () => 'run app'",
+        expression: "(async () => 'run app')()",
       },
       isError: false,
     });
@@ -244,8 +246,12 @@ describe('MCP server', () => {
     await c.close();
     const headless = await connect(makeDeps({ openConfig: async () => Promise.reject(new Error('no display')) }));
     expect(await call(headless, 'open_config')).toEqual({
-      body: expect.objectContaining({ opened: false, hint: expect.stringContaining('no display') }),
-      isError: true,
+      body: {
+        file: '/home/me/.autologin-mcp/credentials.env',
+        opened: false,
+        hint: expect.stringMatching(/no display.*npx autologin-mcp add.*Do not read this file/),
+      },
+      isError: false,
     });
   });
 });

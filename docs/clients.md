@@ -1,6 +1,6 @@
 ---
 title: Agents and browser tools
-description: Use autologin-mcp with Claude Code and Claude in Chrome, Playwright MCP, chrome-devtools-mcp, or any other MCP client that drives a browser.
+description: Use autologin-mcp with Claude Code and Claude in Chrome, Playwright MCP, chrome-devtools-mcp or Puppeteer, and register it in Codex CLI, Gemini CLI, Cursor, VS Code, Claude Desktop or Hermes Agent with print-config.
 ---
 
 # Agents and browser tools
@@ -28,9 +28,29 @@ This is the primary setup, tested end to end on real apps.
 - Bridge mode: the agent passes the `function` field to `evaluate_script`.
 - CDP mode with a shared browser: run chrome-devtools-mcp with `--browserUrl http://127.0.0.1:9222` against the same Chrome as above.
 
+## Puppeteer and tools built on it
+
+- Bridge mode: pass the `expression` field to `page.evaluate` (or to a tool that calls it, such as a Puppeteer MCP server's evaluate tool). `page.evaluate` has no top-level `await`, so the `script` field fails there with `await is not defined`, and the `function` field as a string only returns the function without calling it.
+- CDP mode with a shared browser: `puppeteer.connect({ browserURL: 'http://127.0.0.1:9222' })` with `AUTOLOGIN_CDP_URL` set to the same address.
+
 ## Other MCP clients
 
-The server itself is a standard stdio MCP server, so other clients can start it. Register it with your client's MCP configuration, for example in the common `mcpServers` JSON format:
+The server itself is a standard stdio MCP server, so other agents can start it. `print-config` prints the entry for yours, pinned to the installed version:
+
+```bash
+npx autologin-mcp print-config --client codex     # json (default), claude-desktop, cursor, vscode, gemini, codex, hermes
+```
+
+| Agent | Where the entry goes | Or run |
+|---|---|---|
+| Codex CLI | `~/.codex/config.toml` | `codex mcp add autologin -- npx -y autologin-mcp@1.0.1` |
+| Gemini CLI | `~/.gemini/settings.json` | `gemini mcp add -s user autologin npx -- -y autologin-mcp@1.0.1` |
+| Hermes Agent | `~/.hermes/config.yaml` (`mcp_servers:`) | `hermes mcp add autologin --command npx --args -y autologin-mcp@1.0.1` |
+| VS Code (GitHub Copilot) | `.vscode/mcp.json` or the user `mcp.json` (`servers`) | `code --add-mcp '{"name":"autologin","type":"stdio","command":"npx","args":["-y","autologin-mcp@1.0.1"]}'` |
+| Cursor | `~/.cursor/mcp.json` or `.cursor/mcp.json` | |
+| Claude Desktop | `claude_desktop_config.json` (Settings > Developer > Edit Config) | |
+
+Most of them use the common `mcpServers` JSON format:
 
 ```json
 {
@@ -42,8 +62,8 @@ The server itself is a standard stdio MCP server, so other clients can start it.
 
 Then add profiles with `npx autologin-mcp add`. Keep in mind:
 
-- The `install` command, the skill and the guard hook are for Claude Code only. Other clients get the server's built-in instructions, but not the hook. Use your client's permission settings to keep the agent away from `~/.autologin-mcp`, if it has them.
-- Clients other than Claude Code are not tested yet. Installers for Codex CLI, Gemini CLI and Cursor are on the [roadmap](https://github.com/olgaysezgin/autologin-mcp#roadmap). Reports and pull requests are welcome.
+- The `install` command, the skill and the guard hook are for Claude Code only. Other agents get the server's built-in instructions, but nothing enforces them. Deny `~/.autologin-mcp` in your agent's permission settings, if it has them.
+- Agents other than Claude Code are not tested yet. Reports and pull requests are welcome.
 
 ## Browsers
 

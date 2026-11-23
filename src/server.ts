@@ -16,7 +16,8 @@ export const ADD_HINT =
 
 export const RUN_IN_PAGE_HINT =
   'Run `script` unchanged in the tab that shows the login form, with your browser tool\'s JavaScript evaluation (Claude in Chrome: javascript_tool). ' +
-  'Tools that take a function (Playwright MCP browser_evaluate, chrome-devtools-mcp evaluate_script) take `function` instead. ' +
+  'Tools that take a function (Playwright MCP browser_evaluate, chrome-devtools-mcp evaluate_script) take `function` instead; ' +
+  'tools that evaluate a plain script without top-level await (Puppeteer page.evaluate) take `expression`. ' +
   'The value it returns is the login result (success, submitted, failed, ...). It works once, within the expiry, and only on a page of this profile\'s site. ' +
   'If the call itself fails or returns nothing (the page navigated, the browser tool lost the tab), call `login_status` to get the result the page reported.';
 
@@ -119,6 +120,7 @@ async function loginViaBridge(deps: ServerDeps, usable: UsableProfile[], args: L
     expires_in_s: ticket.expiresInSeconds,
     script: ticket.script,
     function: ticket.function,
+    expression: ticket.expression,
   };
 }
 
@@ -232,10 +234,14 @@ export function createServer(deps: ServerDeps): McpServer {
           note: "The file is open in the user's editor. Ask them to add or edit profiles there and save. Do not read this file.",
         });
       } catch (error) {
-        return reply(
-          { file: deps.configFile, opened: false, hint: `Could not open an editor (${message(error)}). Ask the user to run "npx autologin-mcp edit".` },
-          true,
-        );
+        // No desktop (SSH, CI, a container) is a normal situation, not a tool error: tell the agent where the file is.
+        return reply({
+          file: deps.configFile,
+          opened: false,
+          hint:
+            `Could not open an editor here (${message(error)}). Ask the user to run "npx autologin-mcp add" in a separate terminal (never in this chat), ` +
+            'or to open this file in a text editor there. Do not read this file.',
+        });
       }
     },
   );

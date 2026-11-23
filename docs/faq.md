@@ -23,7 +23,7 @@ Everything in the conversation, including files the agent reads, is sent to the 
 
 ## Which agents and browser tools does it work with?
 
-It is built and tested for Claude Code with Claude in Chrome. It also works with Playwright MCP (`browser_evaluate`) and chrome-devtools-mcp (`evaluate_script`). Other MCP clients can run the server, but the installer, skill and guard hook are Claude Code features today. See [Agents and browser tools](clients.md).
+It is built and tested for Claude Code with Claude in Chrome. It also works with Playwright MCP (`browser_evaluate`), chrome-devtools-mcp (`evaluate_script`) and Puppeteer (`page.evaluate`). Other agents such as Codex CLI, Gemini CLI, Cursor, VS Code, Claude Desktop and Hermes Agent can run the server: `npx autologin-mcp print-config --client <name>` prints their configuration. The installer, skill and guard hook are Claude Code features today. See [Agents and browser tools](clients.md).
 
 ## Do I need to enable Chrome remote debugging?
 

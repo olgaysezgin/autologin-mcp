@@ -62,6 +62,8 @@ npx autologin-mcp add
 
 Upgrade with `npx autologin-mcp@latest install`, remove with `npx autologin-mcp uninstall`. Step-by-step guide: [Getting started](docs/getting-started.md).
 
+Another agent? `npx autologin-mcp print-config --client codex` (or `gemini`, `cursor`, `vscode`, `claude-desktop`, `hermes`) prints its configuration. See [Agents and browser tools](docs/clients.md).
+
 ## Features
 
 - **Logs in when the agent needs it.** The agent calls `login` when the page shows a login form, a "session expired" message, a 401/403 or a redirect to a login URL, then carries on with its task.
@@ -72,6 +74,7 @@ Upgrade with `npx autologin-mcp@latest install`, remove with `npx autologin-mcp 
 - **No account lockouts.** Three failed logins in five minutes pause the profile until you check the credentials.
 - **Several accounts and apps.** One global credentials file outside your projects, with as many profiles as you need.
 - **One command to install.** `npx autologin-mcp install` registers the MCP server, the skill and the guard hook in Claude Code.
+- **Other agents and CI.** `print-config` prints the setup for Codex CLI, Gemini CLI, Cursor, VS Code, Claude Desktop and Hermes Agent, and `add --password-stdin` creates profiles in scripts and CI.
 
 ## Why
 
@@ -87,7 +90,7 @@ The full documentation is in [`docs/`](docs/README.md) and on the [website](http
 
 ### How it works
 
-- **Bridge mode (default, zero setup).** `login` returns a one-time loader script containing only a 60-second URL on `127.0.0.1`. The agent runs it in the tab with the JavaScript tool it already has (`javascript_tool`, `browser_evaluate` or `evaluate_script`). The page then fetches the credentials from your machine, and they are released only if the page's browser-set `Origin` header belongs to the profile's site.
+- **Bridge mode (default, zero setup).** `login` returns a one-time loader script containing only a 60-second URL on `127.0.0.1`. The agent runs it in the tab with the JavaScript tool it already has (`javascript_tool`, `browser_evaluate`, `evaluate_script` or Puppeteer's `page.evaluate`). The page then fetches the credentials from your machine, and they are released only if the page's browser-set `Origin` header belongs to the profile's site.
 - **CDP mode (automatic when Chrome remote debugging is on).** autologin-mcp connects to Chrome over the DevTools Protocol and fills the tab itself; the agent runs nothing.
 - The filler works with React, Vue and Angular forms, waits for the outcome, and returns `success`, `submitted`, or `failed` with the page's error message.
 
@@ -115,9 +118,9 @@ A profile only fills pages whose host matches its root URL (`example.com`, `*.ex
 | Tool | What the agent gets back |
 |---|---|
 | `list_profiles` | Profile name, root URL and username for each profile. Never passwords. |
-| `login({ url?, profile? })` | Bridge mode: `run_in_page` with a one-time `script`/`function` to run in the tab. CDP mode: the result directly (`success`, `submitted`, `failed`, `no_login_form`, `rate_limited`, …). |
+| `login({ url?, profile? })` | Bridge mode: `run_in_page` with a one-time loader to run in the tab, as `script`, `function` or `expression` for the agent's browser tool. CDP mode: the result directly (`success`, `submitted`, `failed`, `no_login_form`, `rate_limited`, …). |
 | `login_status({ profile? })` | The latest outcome per profile, for when the agent's JavaScript call was cut off. |
-| `open_config` | Opens the credentials file in your editor. The content is never returned. |
+| `open_config` | Opens the credentials file in your editor, or returns its path where there is no desktop. The content is never returned. |
 
 More: [MCP tools](docs/mcp-tools.md) and [CLI reference](docs/cli.md).
 
@@ -132,7 +135,8 @@ A Claude Code guard hook and deny rules block the agent from reading the credent
 | Claude Code + Claude in Chrome | Supported and tested end to end |
 | Claude Code + Playwright MCP | Supported (`browser_evaluate`, or CDP with a shared browser) |
 | Claude Code + chrome-devtools-mcp | Supported (`evaluate_script`, or CDP with a shared browser) |
-| Other MCP clients | The stdio server runs; installer, skill and guard hook are Claude Code only |
+| Puppeteer-based browser tools | Supported (`expression` with `page.evaluate`, or CDP with a shared browser) |
+| Codex CLI, Gemini CLI, Cursor, VS Code, Claude Desktop, Hermes Agent | The stdio server runs, and `print-config` prints the setup; installer, skill and guard hook are Claude Code only. Not tested yet |
 
 More: [Agents and browser tools](docs/clients.md) and [Troubleshooting](docs/troubleshooting.md).
 
@@ -161,7 +165,7 @@ More questions: [FAQ](docs/faq.md).
 - [ ] Multi-step logins (username → next → password), iframes, SSO login hosts
 - [ ] TOTP codes
 - [ ] `doctor` and `test <profile>` commands
-- [ ] Installers for Codex CLI, Gemini CLI and Cursor; a Claude Code plugin
+- [ ] Installers that write the config for Codex CLI, Gemini CLI and Cursor (`print-config` prints it today); a Claude Code plugin
 
 ## Development
 

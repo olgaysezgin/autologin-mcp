@@ -34,7 +34,7 @@ The \`autologin\` MCP server fills the login form for you and only tells you the
 ## When the app asks you to log in
 
 1. Call \`mcp__autologin__login\` with \`url\` = the tab's current URL. Pass \`profile\` when there are several accounts for the same app (see \`mcp__autologin__list_profiles\`).
-2. \`run_in_page\`: run the returned \`script\` **unchanged** in that tab with your JavaScript tool (Claude in Chrome: \`javascript_tool\`; Playwright MCP \`browser_evaluate\` / chrome-devtools-mcp \`evaluate_script\`: pass \`function\`). Its return value is the login result below. It contains a one-time URL, never a password. If that call fails or returns nothing (the page navigated, the browser tool lost the tab), call \`mcp__autologin__login_status\` to get the result the page reported.
+2. \`run_in_page\`: run the returned \`script\` **unchanged** in that tab with your JavaScript tool (Claude in Chrome: \`javascript_tool\`; Playwright MCP \`browser_evaluate\` / chrome-devtools-mcp \`evaluate_script\`: pass \`function\`; Puppeteer \`page.evaluate\`: pass \`expression\`). Its return value is the login result below. It contains a one-time URL, never a password. If that call fails or returns nothing (the page navigated, the browser tool lost the tab), call \`mcp__autologin__login_status\` to get the result the page reported.
 3. \`success\`: continue the task where you left off. \`submitted\`: the page navigated; take a look to confirm you are logged in.
 4. \`failed\`: tell the user the \`hint\`; do not retry more than once.
    \`no_login_form\`: the page has no login form. If it carries \`previous_login\` with \`success\` or \`submitted\`, your earlier login went through: continue the task.

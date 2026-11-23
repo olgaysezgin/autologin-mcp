@@ -45,6 +45,7 @@ export interface LoginResult {
   /** Bridge mode: code for the agent to run in the tab (contains a one-time URL, never a credential). */
   script?: string;
   function?: string;
+  expression?: string;
   expires_in_s?: number;
 }
 
