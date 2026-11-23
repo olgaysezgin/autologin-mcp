@@ -33,7 +33,7 @@ Add `--dry-run` to see the changes without applying them. [CLI reference](cli.md
 > ```bash
 > git clone https://github.com/olgaysezgin/autologin-mcp.git && cd autologin-mcp
 > npm install && npm run build && npm pack
-> npx -y file:./autologin-mcp-1.3.0.tgz install --package ./autologin-mcp-1.3.0.tgz
+> npx -y file:./autologin-mcp-1.3.1.tgz install --package ./autologin-mcp-1.3.1.tgz
 > ```
 
 ## 2. Add a login profile
