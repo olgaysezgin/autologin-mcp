@@ -51,10 +51,37 @@ describe('detect', () => {
   });
 
   it('tells a Next / Continue button from a Log in button on an identifier step', () => {
-    document.body.innerHTML = `<form><input type="email"><input type="submit" value="Devam et"></form>`;
+    document.body.innerHTML = `<form><input type="email" autocomplete="username"><input type="submit" value="Devam et"></form>`;
     expect(detect()).toMatchObject({ step: 'identifier', nextButton: true });
-    document.body.innerHTML = `<form><input type="email"><button>Log in</button></form>`;
+    document.body.innerHTML = `<form><input type="text" name="loginfmt"><button>Log in</button></form>`;
     expect(detect()).toMatchObject({ step: 'identifier', nextButton: false });
+  });
+
+  it('only takes fields that say they are a login identifier', () => {
+    // An invite form on a logged-in page: an email field and a Next button, but not a login.
+    document.body.innerHTML = `<form><input type="email" name="invite_email"><button>Next</button></form>`;
+    expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false });
+    document.body.innerHTML = `<form><input type="email" placeholder="Email"><button>Next</button></form>`;
+    expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false });
+    document.body.innerHTML = `<form><input id="identifier" type="text"><button>Next</button></form>`;
+    expect(detect()).toMatchObject({ step: 'identifier' });
+  });
+
+  it('pairs the field with its own button: a form-less newsletter field never borrows the login button', () => {
+    document.body.innerHTML = `
+      <div><input id="news" type="email" name="email"><button>Subscribe</button></div>
+      <form><input id="login" name="username" autocomplete="username"><button id="next">Next</button></form>`;
+    expect(detect()).toMatchObject({ step: 'identifier', hasUsername: true });
+    expect(roleOf('#news')).toBeNull();
+    expect(roleOf('#login')).toBe('username');
+    expect(roleOf('#next')).toBe('submit');
+    // A form-less field still pairs with a button in its own container.
+    document.body.innerHTML = `<main><div id="step"><input id="who" name="email"><div role="button" id="go">Continue</div></div></main>`;
+    expect(detect()).toMatchObject({ step: 'identifier', nextButton: true });
+    expect(roleOf('#who')).toBe('username');
+    // A lone form-less field with no button anywhere is not a username step.
+    document.body.innerHTML = `<main><div><input name="email"></div></main>`;
+    expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false });
   });
 
   it('does not mistake a newsletter form for an identifier-first login', () => {

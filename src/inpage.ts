@@ -56,6 +56,8 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
   // button, and typing a login there is worse than reporting that no login form was found.
   const NEXT_TEXT = /^(continue|next|weiter|suivant|siguiente|continuar|devam( et)?|ileri)$/i;
   const IDENTIFIER_TEXT = /^(log ?-?in|sign ?-?in|login|signin|giri[sş]( yap)?|oturum a[cç]|anmelden|connexion|entrar|iniciar sesi[oó]n)$/i;
+  // Field names and ids of login identifiers (Google, Microsoft "loginfmt", Okta "identifier", most in-house forms).
+  const LOGIN_FIELD = /^(user(_?name|_?id)?|login(_?(id|name))?|loginfmt|identifier|e-?mail|mail|email_?address|account(_?name)?)$/i;
   // Most specific first. Labels and field wrappers (e.g. MUI's red "Password *" label) are skipped below.
   const ERROR_SELECTORS = [
     '[role="alert"]',
@@ -163,33 +165,40 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
     if (!el) {
       // Identifier-first login: a username step before the password one. Only the heuristic path
       // does this: an explicit password selector means the caller expects that field to exist.
-      const identifier = ((): HTMLInputElement | null => {
-        if (selectors.username) {
-          const explicit = find(selectors.username);
-          return usable(explicit) ? explicit : null;
+      const textLike = (el: Element | null): el is HTMLInputElement => usable(el) && ['text', 'email', 'tel'].includes(el.type);
+      // A login identifier says so: autocomplete="username", or a name / id that is exactly a login word.
+      // `type="email"` alone is not enough: invite, share and newsletter fields are email fields too.
+      const loginField = (el: HTMLInputElement): boolean =>
+        (el.getAttribute('autocomplete') ?? '').toLowerCase().split(/\s+/).includes('username') ||
+        [el.name, el.id].some((word) => LOGIN_FIELD.test(word));
+      // A button that means "continue" and not, say, "Subscribe" or "Invite".
+      const continueButton = (scope: ParentNode): Element | null =>
+        Array.from(scope.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]')).find(
+          (el) => visible(el) && !(el as HTMLButtonElement).disabled && (NEXT_TEXT.test(label(el)) || IDENTIFIER_TEXT.test(label(el))),
+        ) ?? null;
+      // The field and its button belong together: the field's form, or else the closest container that holds
+      // a continue button and no other text field (so a form-less newsletter field never borrows a login button).
+      const buttonFor = (field: HTMLInputElement): Element | null => {
+        if (selectors.submit) return find(selectors.submit);
+        if (field.form) return continueButton(field.form);
+        for (let node = field.parentElement; node !== null && node !== document.documentElement; node = node.parentElement) {
+          if (Array.from(node.querySelectorAll('input')).filter(textLike).length > 1) return null;
+          const button = continueButton(node);
+          if (button !== null) return button;
         }
-        const candidates = Array.from(document.querySelectorAll('input')).filter(
-          (el) =>
-            usable(el) &&
-            ['text', 'email', 'tel'].includes(el.type) &&
-            (el.type === 'email' ||
-              /username|email/.test((el.getAttribute('autocomplete') ?? '').toLowerCase()) ||
-              /user|e-?mail|login|account/i.test(`${el.name} ${el.id}`)),
-        );
-        return candidates[0] ?? null;
-      })();
-      if (identifier === null) return { found: false, hasUsername: false, hasSubmit: false };
-      // A button that means "continue" and not, say, "Subscribe": a newsletter form has an email
-      // field too, and typing the login into it would be worse than saying the form is missing.
-      const button = selectors.submit
-        ? find(selectors.submit)
-        : (Array.from((identifier.form ?? document).querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]')).find(
-            (el) => visible(el) && !(el as HTMLButtonElement).disabled && (NEXT_TEXT.test(label(el)) || IDENTIFIER_TEXT.test(label(el))),
-          ) ?? null);
-      if (!visible(button)) return { found: false, hasUsername: false, hasSubmit: false };
-      identifier.setAttribute(ATTR, 'username');
-      button.setAttribute(ATTR, 'submit');
-      return { found: false, hasUsername: true, hasSubmit: true, step: 'identifier', nextButton: NEXT_TEXT.test(label(button)) };
+        return null;
+      };
+      const candidates = selectors.username
+        ? [find(selectors.username)].filter(textLike)
+        : Array.from(document.querySelectorAll('input')).filter((el) => textLike(el) && loginField(el));
+      for (const field of candidates) {
+        const button = buttonFor(field);
+        if (!visible(button)) continue;
+        field.setAttribute(ATTR, 'username');
+        button.setAttribute(ATTR, 'submit');
+        return { found: false, hasUsername: true, hasSubmit: true, step: 'identifier', nextButton: NEXT_TEXT.test(label(button)) };
+      }
+      return { found: false, hasUsername: false, hasSubmit: false };
     }
     password = el as HTMLInputElement;
   }

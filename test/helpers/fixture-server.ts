@@ -61,6 +61,10 @@ export async function startFixtureServer(): Promise<FixtureServer> {
   return {
     origin: `http://127.0.0.1:${port}`,
     received,
-    close: () => new Promise((resolve) => server.close(() => resolve())),
+    close: () =>
+      new Promise((resolve) => {
+        server.close(() => resolve());
+        server.closeAllConnections(); // Chrome keeps idle connections open; do not wait for them
+      }),
   };
 }

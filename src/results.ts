@@ -2,11 +2,13 @@ export interface PreviousLogin {
   status: string;
   at: string;
   url?: string;
+  reason?: string;
 }
 
 export interface LoggedResult {
   profile: string;
   status: string;
+  reason?: string;
   hint?: string;
   url?: string;
   /** On `no_login_form`: the profile's recent real login outcome, which usually explains why there is no form. */
@@ -25,6 +27,14 @@ export interface NoFormContext {
 export const RECENT_MS = 5 * 60_000;
 
 const WENT_THROUGH = new Set(['success', 'submitted']);
+
+/**
+ * Bridge mode: the page navigated right after the username step of an identifier-first login. That is
+ * `submitted`, but not a login that went through: only the username was sent.
+ */
+export const USERNAME_STEP_NAVIGATED = 'username_step_navigated';
+
+const wentThrough = (login: PreviousLogin): boolean => WENT_THROUGH.has(login.status) && login.reason !== USERNAME_STEP_NAVIGATED;
 
 export function alreadyLoggedInHint(previous: PreviousLogin): string {
   return (
@@ -47,21 +57,43 @@ export class ResultLog {
    * `no_login_form`) when it is recent. An agent whose result was cut off often just logs in again.
    */
   noFormContext(profile: string): NoFormContext | null {
+    const previous = this.recent(profile);
+    if (previous === null) return null;
+    return wentThrough(previous) ? { previous_login: previous, hint: alreadyLoggedInHint(previous) } : { previous_login: previous };
+  }
+
+  /**
+   * True when the profile's latest real login outcome went through within RECENT_MS. Then a page without a
+   * password field is most likely the logged-in app, and an email field + Next button on it (an invite, a
+   * search) must not be taken for the username step of a login.
+   */
+  recentlyLoggedIn(profile: string): boolean {
+    const previous = this.recent(profile);
+    return previous !== null && wentThrough(previous);
+  }
+
+  /** The profile's latest real login outcome (not an earlier `no_login_form`) when it is recent. */
+  private recent(profile: string): PreviousLogin | null {
     const latest = this.latest.get(profile);
     const previous: PreviousLogin | undefined =
       latest?.status === 'no_login_form'
         ? latest.previous_login
-        : latest && { status: latest.status, at: latest.at, ...(latest.url === undefined ? {} : { url: latest.url }) };
-    if (previous === undefined || this.now() - Date.parse(previous.at) > RECENT_MS) return null;
-    return WENT_THROUGH.has(previous.status) ? { previous_login: previous, hint: alreadyLoggedInHint(previous) } : { previous_login: previous };
+        : latest && {
+            status: latest.status,
+            at: latest.at,
+            ...(latest.url === undefined ? {} : { url: latest.url }),
+            ...(latest.reason === undefined ? {} : { reason: latest.reason }),
+          };
+    return previous === undefined || this.now() - Date.parse(previous.at) > RECENT_MS ? null : previous;
   }
 
-  record(profile: string, result: { status: string; hint?: string; url?: string }, via: LoggedResult['via']): LoggedResult {
+  record(profile: string, result: { status: string; reason?: string; hint?: string; url?: string }, via: LoggedResult['via']): LoggedResult {
     const context = result.status === 'no_login_form' ? this.noFormContext(profile) : null;
     const hint = context?.hint ?? result.hint;
     const entry: LoggedResult = {
       profile,
       status: result.status,
+      ...(result.reason === undefined ? {} : { reason: result.reason }),
       ...(hint === undefined ? {} : { hint }),
       ...(result.url === undefined ? {} : { url: result.url }),
       ...(context === null ? {} : { previous_login: context.previous_login }),

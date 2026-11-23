@@ -96,6 +96,22 @@ describe('login engine in a real Chrome (auto-connect via DevToolsActivePort)', 
     expect(app.received.at(-1)).toEqual(VALID);
   });
 
+  it('types nothing on another site when the username step leads there', async () => {
+    const other = await startFixtureServer(); // another port: another site, like a single sign-on host
+    try {
+      const before = app.received.length;
+      const { tab, result } = await loginOn(`cross-site.html?to=${encodeURIComponent(`${other.origin}/plain.html`)}`, profile());
+      expect(result).toMatchObject({ status: 'needs_human', reason: 'left_profile_site', hint: expect.stringContaining('nothing was typed there') });
+      expect(new URL(tab.url()).origin).toBe(other.origin);
+      expect(await tab.$eval('input[type="password"]', (el) => (el as HTMLInputElement).value)).toBe('');
+      expect(other.received).toEqual([]);
+      expect(app.received.length).toBe(before);
+      await tab.close();
+    } finally {
+      await other.close();
+    }
+  });
+
   it('works with controlled inputs that only update on input events (React-like)', async () => {
     const { result } = await loginOn('controlled.html', profile());
     expect(result.status).toBe('success');
@@ -207,6 +223,24 @@ describe('bridge mode in a real Chrome (autologin-mcp has no CDP access)', () =>
     const slow = await bridgeOn('two-step-slow.html', profile());
     expect(slow.result.status).toBe('success');
     expect(app.received.at(-1)).toEqual(VALID);
+  });
+
+  it('reports a username step that leads to another site as the username only, and sends no password', async () => {
+    const other = await startFixtureServer();
+    try {
+      const before = app.received.length;
+      const tab = await open(`cross-site.html?to=${encodeURIComponent(`${other.origin}/plain.html`)}`);
+      const fn = (await bridge.issue(profile())).function;
+      const result = await tab.evaluate(`(${fn})()`).catch(() => null);
+      // The page navigates away, so the agent's call may be cut off; the page still reported the outcome.
+      await vi.waitFor(() => expect(reports.at(-1)).toEqual(['app', expect.objectContaining({ status: 'submitted', reason: 'username_step_navigated' })]));
+      if (result !== null) expect(result).toMatchObject({ status: 'submitted', reason: 'username_step_navigated' });
+      expect(other.received).toEqual([]);
+      expect(app.received.length).toBe(before);
+      await tab.close();
+    } finally {
+      await other.close();
+    }
   });
 
   it('handles Enter-to-submit pages and explicit selectors', async () => {

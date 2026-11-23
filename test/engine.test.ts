@@ -23,6 +23,8 @@ class FakePage implements PageLike {
   bringToFrontError: unknown = null;
   submitResult: 'clicked' | 'submitted' | 'none' = 'clicked';
   insertError: unknown = null;
+  currentUrl = 'https://app.test/login';
+  onSubmit: (() => void) | null = null;
 
   constructor(
     private readonly detects: Array<Step<DetectResult>>,
@@ -30,7 +32,7 @@ class FakePage implements PageLike {
   ) {}
 
   url(): string {
-    return 'https://app.test/login';
+    return this.currentUrl;
   }
 
   private next<T>(queue: Array<Step<T>>): T {
@@ -57,6 +59,7 @@ class FakePage implements PageLike {
       click: async () => {
         if (this.clickError) throw this.clickError;
         this.calls.push(`click:${role}`);
+        if (role === 'submit') this.onSubmit?.();
       },
     };
   }
@@ -256,6 +259,37 @@ describe('performLogin', () => {
       page.bringToFrontError = new Error('no window');
       expect((await performLogin(page, profile, timing, fakeClock())).status).toBe('success');
       expect(page.typed).toEqual(['qa', 'qa', 'pw']);
+    });
+
+    it('types nothing into another site when the username step leads there (single sign-on)', async () => {
+      const page = new FakePage([...repeat(next, 5), next, FOUND], [onForm(), onForm(), loggedIn]);
+      page.onSubmit = () => (page.currentUrl = 'https://login.idp.test/authorize?client=app');
+      expect(await performLogin(page, profile, timing, fakeClock())).toEqual({
+        status: 'needs_human',
+        profile: 'app',
+        url: 'https://login.idp.test/authorize?client=app',
+        reason: 'left_profile_site',
+        hint: expect.stringContaining('login.idp.test, which is not part of profile "app"'),
+      });
+      expect(page.typed).toEqual(['qa']);
+    });
+
+    it('types nothing when the tab is on another site before it starts', async () => {
+      const page = new FakePage([...repeat(next, 5)], [onForm()]);
+      page.currentUrl = 'https://elsewhere.test/login';
+      expect(await performLogin(page, profile, timing, fakeClock())).toMatchObject({ status: 'needs_human', reason: 'left_profile_site' });
+      const onePage = new FakePage([FOUND], [onForm()]);
+      onePage.currentUrl = 'https://elsewhere.test/login';
+      expect(await performLogin(onePage, profile, timing, fakeClock())).toMatchObject({ status: 'needs_human', reason: 'left_profile_site' });
+      expect([...page.typed, ...onePage.typed]).toEqual([]);
+    });
+
+    it('skips the username step right after a login that went through', async () => {
+      const page = new FakePage([...repeat(next, 5)], [onForm()]);
+      expect(await performLogin(page, profile, timing, fakeClock(), { identifierStep: false })).toMatchObject({ status: 'no_login_form' });
+      expect(page.typed).toEqual([]);
+      const onePage = new FakePage([FOUND], [onForm(), loggedIn]);
+      expect((await performLogin(onePage, profile, timing, fakeClock(), { identifierStep: false })).status).toBe('success');
     });
 
     it('hands the login to a human, without a failure, when no password step follows', async () => {

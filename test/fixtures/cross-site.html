@@ -1,0 +1,15 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Username step that leads to another site</title></head>
+<body>
+  <!-- Like a company sign-in: Next sends the browser to another site (the URL in ?to=, another server on
+       another port), where a password form waits. The profile's password must never be typed there. -->
+  <form id="step1" method="get">
+    <label>Email <input type="email" name="email" autocomplete="username"></label>
+    <button type="submit">Next</button>
+  </form>
+  <script>
+    document.getElementById('step1').action = new URLSearchParams(location.search).get('to');
+  </script>
+</body>
+</html>

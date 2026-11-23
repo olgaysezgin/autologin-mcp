@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { alreadyLoggedInHint, RECENT_MS, ResultLog } from '../src/results.ts';
+import { alreadyLoggedInHint, RECENT_MS, ResultLog, USERNAME_STEP_NAVIGATED } from '../src/results.ts';
 
 describe('ResultLog', () => {
   it('keeps the latest result per profile', () => {
@@ -18,6 +18,26 @@ describe('ResultLog', () => {
 
 describe('ResultLog no_login_form context', () => {
   const T0 = Date.UTC(2026, 10, 22, 12, 0, 0);
+
+  it('knows when a login went through recently, and that a username step alone does not count', () => {
+    let now = T0;
+    const log = new ResultLog(() => now);
+    expect(log.recentlyLoggedIn('app')).toBe(false);
+    log.record('app', { status: 'failed', reason: 'still_on_login_form' }, 'cdp');
+    expect(log.recentlyLoggedIn('app')).toBe(false);
+    expect(log.get('app')).toEqual([expect.objectContaining({ status: 'failed', reason: 'still_on_login_form' })]);
+    log.record('app', { status: 'submitted', reason: USERNAME_STEP_NAVIGATED, url: 'http://localhost:3000/verify' }, 'bridge');
+    expect(log.recentlyLoggedIn('app')).toBe(false);
+    expect(log.noFormContext('app')).toEqual({
+      previous_login: { status: 'submitted', reason: USERNAME_STEP_NAVIGATED, at: '2026-11-22T12:00:00.000Z', url: 'http://localhost:3000/verify' },
+    });
+    log.record('app', { status: 'success' }, 'bridge');
+    expect(log.recentlyLoggedIn('app')).toBe(true);
+    log.record('app', { status: 'no_login_form' }, 'bridge');
+    expect(log.recentlyLoggedIn('app')).toBe(true);
+    now += RECENT_MS + 1;
+    expect(log.recentlyLoggedIn('app')).toBe(false);
+  });
 
   it('tells an agent that logs in again that its previous login went through', () => {
     let now = T0;

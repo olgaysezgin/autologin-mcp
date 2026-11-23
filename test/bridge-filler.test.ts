@@ -115,7 +115,7 @@ describe('bridgeLogin', () => {
     identifier();
     const next = document.querySelector('#next')!;
     next.addEventListener('click', () => setTimeout(() => window.dispatchEvent(new Event('beforeunload')), 5));
-    expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toMatchObject({ status: 'submitted', hint: expect.stringContaining('navigated') });
+    expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toMatchObject({ status: 'submitted', reason: 'username_step_navigated', hint: expect.stringContaining('navigated') });
   });
 
   describe('identifier-first safety', () => {
@@ -178,10 +178,23 @@ describe('bridgeLogin', () => {
       expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toEqual({ status: 'failed', url: location.href, reason: 'identifier_rejected', hint: 'No account for this email' });
     });
 
-    it('reports a page that navigates right away on the username step', async () => {
+    it('reports a page that navigates right away on the username step, as a username step only', async () => {
       document.body.innerHTML = `<form><input id="mail" type="email"><button id="next" type="button">Next</button></form>`;
       document.querySelector('#next')!.addEventListener('click', () => window.dispatchEvent(new Event('beforeunload')));
-      expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toMatchObject({ status: 'submitted', hint: expect.stringContaining('after the username step') });
+      expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toMatchObject({
+        status: 'submitted',
+        reason: 'username_step_navigated',
+        hint: expect.stringContaining('Only the username was sent'),
+      });
+    });
+
+    it('skips the username step right after a login that went through', async () => {
+      document.body.innerHTML = `<form><input id="mail" type="email"><button id="next" type="button">Next</button></form>`;
+      const clicked = vi.fn();
+      document.querySelector('#next')!.addEventListener('click', clicked);
+      expect(await bridgeLogin(autologinInpage, CREDS, TIMING, { identifierStep: false })).toMatchObject({ status: 'no_login_form' });
+      expect(clicked).not.toHaveBeenCalled();
+      expect(document.querySelector<HTMLInputElement>('#mail')!.value).toBe('');
     });
 
     it('presses Enter in the username field when its button is gone by the time it submits', async () => {

@@ -1,5 +1,6 @@
 import { FIELD_ATTR, type DetectResult, type FieldRole, type InpageAction, type InpageArg, type StateResult, type SubmitResult } from '../inpage.js';
 import type { PreviousLogin } from '../results.js';
+import { hostOf, matchesUrl } from '../store/match.js';
 import type { UsableProfile } from '../store/profiles.js';
 
 export interface ElementLike {
@@ -60,8 +61,20 @@ export interface LoginTiming {
 
 export const DEFAULT_TIMING: LoginTiming = { detectTimeoutMs: 5_000, verifyTimeoutMs: 10_000, pollMs: 250, earlyFailAfterMs: 1_500 };
 
-/** How long an identifier step with a Next / Continue button must stay before the username is sent. */
-export const identifierSettleMs = (timing: { detectTimeoutMs: number; pollMs: number }): number => Math.min(timing.detectTimeoutMs, 4 * timing.pollMs);
+/**
+ * How long an identifier step with a Next / Continue button must stay before the username is sent alone:
+ * half the detect time (2.5 s by default), so a one-page form whose password field renders late is not split.
+ */
+export const identifierSettleMs = (timing: { detectTimeoutMs: number; pollMs: number }): number =>
+  Math.min(timing.detectTimeoutMs, Math.max(4 * timing.pollMs, timing.detectTimeoutMs / 2));
+
+export interface LoginOptions {
+  /**
+   * Allow the identifier-first path (username, then password). Off right after a login that went through:
+   * a page without a password field is then most likely the logged-in app, not a username step.
+   */
+  identifierStep?: boolean;
+}
 
 export const PASSWORD_STEP_HINT =
   'The page did not ask for a password after the username step. It may use single sign-on, a passkey or a second factor, so a human has to finish this login.';
@@ -116,8 +129,23 @@ export async function performLogin(
   profile: UsableProfile,
   timing: LoginTiming = DEFAULT_TIMING,
   clock: Clock = realClock,
+  options: LoginOptions = {},
 ): Promise<LoginResult> {
   const base = { profile: profile.name };
+  const identifierStep = options.identifierStep ?? true;
+  // The tab can leave the profile's site while we wait (a redirect, or the username step sending it to a
+  // single sign-on host). Nothing is typed into a page of another site.
+  const leftSite = (): LoginResult | null => {
+    const url = page.url();
+    if (matchesUrl(profile.root, url)) return null;
+    return {
+      status: 'needs_human',
+      ...base,
+      url,
+      reason: 'left_profile_site',
+      hint: `The login moved to ${hostOf(url)}, which is not part of profile "${profile.name}" (${profile.url}), so nothing was typed there. This is usually single sign-on, which a human has to finish.`,
+    };
+  };
   const detect = () => attempt(() => page.run<DetectResult>('detect', { selectors: profile.selectors }));
   const state = () => attempt(() => page.run<StateResult>('state', { successSelector: profile.selectors.success }));
   const clearPassword = () => attempt(() => page.run<boolean>('clear', { role: 'password' }));
@@ -133,7 +161,7 @@ export async function performLogin(
     for (;;) {
       if (detected?.found || detected?.error) break;
       const now = clock.now();
-      if (detected?.step === 'identifier') {
+      if (identifierStep && detected?.step === 'identifier') {
         identifierSince ??= now;
         if (detected.nextButton && now - identifierSince >= settleMs) break;
       } else {
@@ -144,11 +172,13 @@ export async function performLogin(
       detected = await detect();
     }
     if (!detected?.found) {
-      if (detected?.step !== 'identifier' || !detected.hasUsername) {
+      if (!identifierStep || detected?.step !== 'identifier' || !detected.hasUsername) {
         return { status: 'no_login_form', ...base, url: page.url(), hint: detected?.error ?? 'No visible password field was found on the page.' };
       }
       // Identifier-first login: send the username, then wait for the page to ask for the password.
       // A message already on the page (say "Your session has expired") is not an answer to the username.
+      const away = leftSite();
+      if (away !== null) return away;
       const beforeStep = await state();
       await page.bringToFront().catch(() => undefined);
       await typeInto(page, 'username', profile.username);
@@ -172,6 +202,8 @@ export async function performLogin(
       detected = next;
     }
 
+    const away = leftSite();
+    if (away !== null) return away;
     const before = await state();
     await page.bringToFront().catch(() => undefined);
     if (detected.hasUsername) await typeInto(page, 'username', profile.username);
