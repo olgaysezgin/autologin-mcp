@@ -38,6 +38,38 @@ describe('detect', () => {
     expect(roleOf('#show')).toBeNull();
   });
 
+  it('finds an identifier-first step and tags its field and continue button', () => {
+    document.body.innerHTML = `<form><input id="email" type="email" name="email"><button id="next">Next</button></form>`;
+    expect(detect()).toEqual({ found: false, hasUsername: true, hasSubmit: true, step: 'identifier' });
+    expect(roleOf('#email')).toBe('username');
+    expect(roleOf('#next')).toBe('submit');
+  });
+
+  it('does not mistake a newsletter form for an identifier-first login', () => {
+    document.body.innerHTML = `<form><input type="email" name="email"><button type="submit">Subscribe</button></form>`;
+    expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false });
+  });
+
+  it('does not treat a comment form with a Submit button as an identifier-first login', () => {
+    document.body.innerHTML = `<form><input id="nick" name="username" type="text"><button type="submit">Submit</button></form>`;
+    expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false });
+  });
+
+  it('honours explicit selectors on the identifier step and stays strict about a missing password selector', () => {
+    document.body.innerHTML = `<input id="who" type="text"><a id="go">Continue</a>`;
+    expect(detect({ selectors: { username: '#who', submit: '#go' } })).toMatchObject({ step: 'identifier', hasUsername: true, hasSubmit: true });
+    expect(roleOf('#who')).toBe('username');
+    expect(roleOf('#go')).toBe('submit');
+    expect(detect({ selectors: { password: '#pw' } })).toMatchObject({ found: false, error: 'The password selector did not match a visible field.' });
+  });
+
+  it('reports no form when the identifier field or its button is not visible', () => {
+    document.body.innerHTML = `<form><input type="email" data-zero><button>Next</button></form>`;
+    expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false });
+    document.body.innerHTML = `<form><input type="email"><button data-zero>Next</button></form>`;
+    expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false });
+  });
+
   it('reports pages without a usable password field', () => {
     document.body.innerHTML = `
       <input type="password" style="display:none">
@@ -185,6 +217,14 @@ describe('submit', () => {
     document.querySelector('button')!.addEventListener('click', click);
     expect(autologinInpage('submit', {})).toBe('clicked');
     expect(click).toHaveBeenCalledOnce();
+  });
+
+  it('submits the username form of an identifier-first page', () => {
+    document.body.innerHTML = `<form><input type="email" ${FIELD_ATTR}="username"></form>`;
+    const onSubmit = vi.fn((e: Event) => e.preventDefault());
+    document.querySelector('form')!.addEventListener('submit', onSubmit);
+    expect(autologinInpage('submit', {})).toBe('submitted');
+    expect(onSubmit).toHaveBeenCalledOnce();
   });
 
   it('submits the password form, or reports that nothing could be submitted', () => {

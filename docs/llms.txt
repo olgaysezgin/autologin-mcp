@@ -11,7 +11,8 @@ Key facts:
 - CDP mode (automatic when Chrome remote debugging is on): autologin-mcp fills the tab itself over the Chrome DevTools Protocol.
 - Results: `success`, `submitted`, `failed` (with the page's error message), `no_login_form`, `rate_limited` and others. If the agent's JavaScript call is cut off, `login_status` returns the outcome.
 - Works with Claude Code + Claude in Chrome (tested), Playwright MCP, chrome-devtools-mcp; other MCP clients can run the stdio server.
-- Not supported yet: SSO login hosts, two-factor/TOTP codes, multi-step logins, iframes.
+- Identifier-first logins (username, then the password field on the same page) are supported.
+- Not supported yet: SSO login hosts, two-factor/TOTP codes, logins that navigate to a second document, iframes.
 - Requirements: Node.js 22.12+. License: MIT. Author: Olgay Sezgin.
 
 ## Documentation

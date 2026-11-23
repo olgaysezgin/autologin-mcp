@@ -118,12 +118,39 @@ export async function performLogin(
   try {
     const detectStart = clock.now();
     let detected = await detect();
-    while (!detected?.found && !detected?.error && clock.now() - detectStart < timing.detectTimeoutMs) {
+    while (!detected?.found && detected?.step !== 'identifier' && !detected?.error && clock.now() - detectStart < timing.detectTimeoutMs) {
       await clock.sleep(timing.pollMs);
       detected = await detect();
     }
     if (!detected?.found) {
-      return { status: 'no_login_form', ...base, url: page.url(), hint: detected?.error ?? 'No visible password field was found on the page.' };
+      if (detected?.step !== 'identifier' || !detected.hasUsername) {
+        return { status: 'no_login_form', ...base, url: page.url(), hint: detected?.error ?? 'No visible password field was found on the page.' };
+      }
+      // Identifier-first login: send the username, then wait for the page to ask for the password.
+      await page.bringToFront().catch(() => undefined);
+      await typeInto(page, 'username', profile.username);
+      await submitForm(page, detected.hasSubmit);
+      const stepStart = clock.now();
+      let next = await detect();
+      while (!next?.found) {
+        const current = await state();
+        if (current?.errorText) {
+          return { status: 'failed', ...base, url: page.url(), reason: 'identifier_rejected', hint: current.errorText };
+        }
+        if (clock.now() - stepStart >= timing.detectTimeoutMs) break;
+        await clock.sleep(timing.pollMs);
+        next = await detect();
+      }
+      if (!next?.found) {
+        return {
+          status: 'failed',
+          ...base,
+          url: page.url(),
+          reason: 'password_step_timeout',
+          hint: 'The page did not ask for a password after the username step. It may use single sign-on or a second factor, so a human has to finish this login.',
+        };
+      }
+      detected = next;
     }
 
     const before = await state();

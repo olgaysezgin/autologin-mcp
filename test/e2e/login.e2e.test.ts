@@ -77,6 +77,12 @@ describe('login engine in a real Chrome (auto-connect via DevToolsActivePort)', 
     expect(await tab.$eval('input[type="password"]', (el) => (el as HTMLInputElement).value)).toBe('');
   });
 
+  it('logs into an identifier-first page that swaps the form in place', async () => {
+    const { result } = await loginOn('two-step.html', profile());
+    expect(result).toMatchObject({ status: 'success', profile: 'app' });
+    expect(app.received.at(-1)).toEqual(VALID);
+  });
+
   it('works with controlled inputs that only update on input events (React-like)', async () => {
     const { result } = await loginOn('controlled.html', profile());
     expect(result.status).toBe('success');
@@ -172,6 +178,12 @@ describe('bridge mode in a real Chrome (autologin-mcp has no CDP access)', () =>
     expect(result).toMatchObject({ status: 'failed', hint: 'Invalid credentials' });
     expect(await tab.$eval('#pass', (el) => (el as HTMLInputElement).value)).toBe('');
     await vi.waitFor(() => expect(reports.at(-1)![1].status).toBe('failed'));
+  });
+
+  it('handles an identifier-first page in bridge mode', async () => {
+    const { result } = await bridgeOn('two-step.html', profile());
+    expect(result.status).toBe('success');
+    expect(app.received.at(-1)).toEqual(VALID);
   });
 
   it('handles Enter-to-submit pages and explicit selectors', async () => {

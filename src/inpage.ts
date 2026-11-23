@@ -22,6 +22,11 @@ export interface DetectResult {
   found: boolean;
   hasUsername: boolean;
   hasSubmit: boolean;
+  /**
+   * Set when the page asks for the username first and shows the password step only after it
+   * (identifier-first login: Google, Microsoft, Okta and other SPA logins).
+   */
+  step?: 'identifier';
   error?: string;
 }
 
@@ -40,6 +45,11 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
   const ATTR = 'data-autologin-mcp';
   const SUBMIT_TEXT =
     /^(log ?-?in|sign ?-?in|login|signin|submit|continue|giri[sş]( yap)?|oturum a[cç]|anmelden|connexion|entrar|iniciar sesi[oó]n)$/i;
+  // The button that moves an identifier-first page to its password step.
+  // "Submit" is deliberately absent: a comment or contact form has a username field and a Submit
+  // button, and typing a login there is worse than reporting that no login form was found.
+  const IDENTIFIER_TEXT =
+    /^(log ?-?in|sign ?-?in|login|signin|continue|next|giri[sş]( yap)?|oturum a[cç]|anmelden|weiter|connexion|suivant|entrar|siguiente|iniciar sesi[oó]n)$/i;
   // Most specific first. Labels and field wrappers (e.g. MUI's red "Password *" label) are skipped below.
   const ERROR_SELECTORS = [
     '[role="alert"]',
@@ -117,7 +127,7 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
       button.click();
       return 'clicked';
     }
-    const form = (tagged('password') as HTMLInputElement | null)?.form;
+    const form = ((tagged('password') ?? tagged('username')) as HTMLInputElement | null)?.form;
     if (form) {
       form.requestSubmit();
       return 'submitted';
@@ -142,7 +152,37 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
     password = el;
   } else {
     const el = Array.from(document.querySelectorAll('input[type="password"]')).find(usable);
-    if (!el) return { found: false, hasUsername: false, hasSubmit: false };
+    if (!el) {
+      // Identifier-first login: a username step before the password one. Only the heuristic path
+      // does this: an explicit password selector means the caller expects that field to exist.
+      const identifier = ((): HTMLInputElement | null => {
+        if (selectors.username) {
+          const explicit = find(selectors.username);
+          return usable(explicit) ? explicit : null;
+        }
+        const candidates = Array.from(document.querySelectorAll('input')).filter(
+          (el) =>
+            usable(el) &&
+            ['text', 'email', 'tel'].includes(el.type) &&
+            (el.type === 'email' ||
+              /username|email/.test((el.getAttribute('autocomplete') ?? '').toLowerCase()) ||
+              /user|e-?mail|login|account/i.test(`${el.name} ${el.id}`)),
+        );
+        return candidates[0] ?? null;
+      })();
+      if (identifier === null) return { found: false, hasUsername: false, hasSubmit: false };
+      // A button that means "continue" and not, say, "Subscribe": a newsletter form has an email
+      // field too, and typing the login into it would be worse than saying the form is missing.
+      const button = selectors.submit
+        ? find(selectors.submit)
+        : (Array.from((identifier.form ?? document).querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]')).find(
+            (el) => visible(el) && !(el as HTMLButtonElement).disabled && IDENTIFIER_TEXT.test(el instanceof HTMLInputElement ? el.value.trim() : text(el)),
+          ) ?? null);
+      if (!visible(button)) return { found: false, hasUsername: false, hasSubmit: false };
+      identifier.setAttribute(ATTR, 'username');
+      button.setAttribute(ATTR, 'submit');
+      return { found: false, hasUsername: true, hasSubmit: true, step: 'identifier' };
+    }
     password = el as HTMLInputElement;
   }
 

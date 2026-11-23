@@ -31,6 +31,14 @@ No visible password field was found within 5 seconds.
 - If the login form is inside an iframe, a shadow root or behind a "Log in" button, it is not supported yet. Open the form first, or see the roadmap.
 - If the form is unusual, set `<PROFILE>_PASSWORD_SELECTOR` (and the other selectors) for the profile. See [Configuration](configuration.md#profiles).
 
+## The page asks for the username first
+
+An identifier-first login (email, then password, on the same page) is filled in two steps: autologin-mcp types the username, presses Continue/Next and waits up to 5 seconds for the password field.
+
+- `failed` with `reason: password_step_timeout`: no password field appeared. The page may use a second factor, single sign-on, or it navigated to a second document; run `login` again on the password page.
+- `failed` with `reason: identifier_rejected`: the page refused the username; the `hint` has its message.
+- If the continue button has unusual text, set `<PROFILE>_SUBMIT_SELECTOR`.
+
 ## `failed` although the credentials are right
 
 - The heuristic may not find the right button. Set `<PROFILE>_SUBMIT_SELECTOR`.

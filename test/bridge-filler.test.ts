@@ -86,6 +86,38 @@ describe('bridgeLogin', () => {
     expect(Date.now() - startedAt).toBeLessThan(500);
   });
 
+  it('handles an identifier-first page that swaps in the password step', async () => {
+    document.body.innerHTML = `<div id="step1"><input id="mail" type="email"><div role="button" id="next">Next</div></div><p id="err" class="error"></p>`;
+    document.querySelector('#next')!.addEventListener('click', () => {
+      document.body.innerHTML = `<div id="step2"><input id="pw" type="password"><div role="button" id="go">Sign in</div><p id="err" class="error"></p></div>`;
+      document.querySelector('#go')!.addEventListener('click', (e) => {
+        e.preventDefault();
+        document.querySelector('#step2')!.remove();
+      });
+    });
+    expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toEqual({ status: 'success', url: location.href });
+  });
+
+  it('stops on an identifier-first page whose username is rejected', async () => {
+    document.body.innerHTML = `<div id="step1"><input id="mail" type="email"><div role="button" id="next">Next</div><p id="err" class="error"></p></div>`;
+    document.querySelector('#next')!.addEventListener('click', () => {
+      document.querySelector('#err')!.textContent = `No account for ${CREDS.username}`;
+    });
+    expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toEqual({ status: 'failed', url: location.href, reason: 'identifier_rejected', hint: `No account for ${CREDS.username}` });
+  });
+
+  it('times out when the password step never appears, and reports a navigation on the way', async () => {
+    const identifier = () =>
+      (document.body.innerHTML = `<div id="step1"><input id="mail" type="email"><div role="button" id="next">Next</div></div>`);
+    identifier();
+    expect(await bridgeLogin(autologinInpage, CREDS, { ...TIMING, detectTimeoutMs: 30 })).toMatchObject({ status: 'failed', reason: 'password_step_timeout' });
+
+    identifier();
+    const next = document.querySelector('#next')!;
+    next.addEventListener('click', () => setTimeout(() => window.dispatchEvent(new Event('beforeunload')), 5));
+    expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toMatchObject({ status: 'submitted', hint: expect.stringContaining('navigated') });
+  });
+
   it('presses Enter when there is nothing to click and fills only the password when there is no username field', async () => {
     let received: unknown = null;
     app(() => undefined, '<input id="pass" type="password">');
