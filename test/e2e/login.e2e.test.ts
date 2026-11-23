@@ -244,7 +244,13 @@ describe('bridge mode in a real Chrome (autologin-mcp has no CDP access)', () =>
   });
 
   it('handles Enter-to-submit pages and explicit selectors', async () => {
-    expect((await bridgeOn('enter.html', profile())).result.status).toBe('submitted');
+    // enter.html navigates on Enter, so the evaluate call can be cut off (as an agent's can); the page still reports.
+    const reported = reports.length;
+    const tab = await open('enter.html');
+    const fn = (await bridge.issue(profile())).function;
+    const direct = (await tab.evaluate(`(${fn})()`).catch(() => null)) as { status: string } | null;
+    await vi.waitFor(() => expect(reports.slice(reported)).toEqual([['app', expect.objectContaining({ status: 'submitted' })]]));
+    if (direct !== null) expect(direct.status).toBe('submitted');
     const selectors = { APP_USERNAME_SELECTOR: '#login-name', APP_PASSWORD_SELECTOR: '#secret', APP_SUBMIT_SELECTOR: '#go', APP_SUCCESS_SELECTOR: '#welcome' };
     expect((await bridgeOn('custom.html', profile(selectors))).result.status).toBe('success');
   });
