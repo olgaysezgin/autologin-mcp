@@ -33,10 +33,17 @@ No visible password field was found within 5 seconds.
 
 ## The page asks for the username first
 
-An identifier-first login (email, then password, on the same page) is filled in two steps: autologin-mcp types the username, presses Continue/Next and waits up to 5 seconds for the password field.
+An identifier-first login (email, then password, on the same page) is filled in two steps: autologin-mcp types the username, presses the button and waits up to 5 seconds for the password field.
 
-- `failed` with `reason: password_step_timeout`: no password field appeared. The page may use a second factor, single sign-on, or it navigated to a second document; run `login` again on the password page.
-- `failed` with `reason: identifier_rejected`: the page refused the username; the `hint` has its message.
+Before it sends the username alone, autologin-mcp makes sure the page really is a username step, so a normal form whose password field renders a little late is still filled in one go:
+
+- With a **Next** or **Continue** button, the username step has to stay on the page for one second.
+- With a **Log in** or **Sign in** button, autologin-mcp first waits the whole detect time (5 seconds) for a password field.
+
+What the results mean:
+
+- `needs_human` with `reason: password_step_timeout`: no password field appeared after the username. The page probably uses single sign-on, a passkey or a second factor, and a person has to finish the login. No password was sent, and the result does not count toward the rate limit. If the page navigated to a second document instead, run `login` again on the password page.
+- `failed` with `reason: identifier_rejected`: the page showed a new message after the username, for example "No account for this email"; the `hint` has it. Messages that were already on the page before, such as "Your session has expired", are ignored.
 - If the continue button has unusual text, set `<PROFILE>_SUBMIT_SELECTOR`.
 
 ## `failed` although the credentials are right

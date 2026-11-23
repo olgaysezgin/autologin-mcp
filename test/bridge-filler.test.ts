@@ -110,12 +110,96 @@ describe('bridgeLogin', () => {
     const identifier = () =>
       (document.body.innerHTML = `<div id="step1"><input id="mail" type="email"><div role="button" id="next">Next</div></div>`);
     identifier();
-    expect(await bridgeLogin(autologinInpage, CREDS, { ...TIMING, detectTimeoutMs: 30 })).toMatchObject({ status: 'failed', reason: 'password_step_timeout' });
+    expect(await bridgeLogin(autologinInpage, CREDS, { ...TIMING, detectTimeoutMs: 30 })).toMatchObject({ status: 'needs_human', reason: 'password_step_timeout' });
 
     identifier();
     const next = document.querySelector('#next')!;
     next.addEventListener('click', () => setTimeout(() => window.dispatchEvent(new Event('beforeunload')), 5));
     expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toMatchObject({ status: 'submitted', hint: expect.stringContaining('navigated') });
+  });
+
+  describe('identifier-first safety', () => {
+    /** One-page form whose password field mounts `delay` ms after the email field and the button. */
+    function staggered(button: string, delay: number) {
+      const seen: Array<{ username: string; password: string }> = [];
+      document.body.innerHTML = `<div id="login"><input id="user" type="email"><span id="slot"></span><div role="button" id="go">${button}</div><p id="err" class="error"></p></div>`;
+      setTimeout(() => (document.querySelector('#slot')!.innerHTML = '<input id="pass" type="password">'), delay);
+      document.querySelector('#go')!.addEventListener('click', () => {
+        const password = document.querySelector<HTMLInputElement>('#pass')?.value ?? '';
+        seen.push({ username: document.querySelector<HTMLInputElement>('#user')!.value, password });
+        if (password === '') showError('Password is required');
+        else document.querySelector('#login')!.remove();
+      });
+      return seen;
+    }
+
+    it('waits for a password field that mounts after the email field and a Log in button', async () => {
+      const seen = staggered('Log in', 60);
+      expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toEqual({ status: 'success', url: location.href });
+      expect(seen).toEqual([{ username: CREDS.username, password: CREDS.password }]);
+    });
+
+    it('waits a moment before treating a Continue button as an identifier step', async () => {
+      const seen = staggered('Continue', 20);
+      expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toEqual({ status: 'success', url: location.href });
+      expect(seen).toEqual([{ username: CREDS.username, password: CREDS.password }]);
+    });
+
+    it('treats a Sign in button as an identifier step only once the password field had its time', async () => {
+      document.body.innerHTML = `<div id="step1"><input id="mail" type="email"><div role="button" id="go">Sign in</div></div>`;
+      let clickedAt = 0;
+      document.querySelector('#go')!.addEventListener('click', () => {
+        clickedAt = Date.now();
+        document.body.innerHTML = `<div id="step2"><input id="pw" type="password"><div role="button" id="go2">Sign in</div></div>`;
+        document.querySelector('#go2')!.addEventListener('click', () => document.querySelector('#step2')!.remove());
+      });
+      const startedAt = Date.now();
+      expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toEqual({ status: 'success', url: location.href });
+      expect(clickedAt - startedAt).toBeGreaterThanOrEqual(TIMING.detectTimeoutMs - 5);
+    });
+
+    it('ignores an alert that was on the page before the username step', async () => {
+      document.body.innerHTML = `<p role="alert">Your session has expired. Please sign in again.</p><div id="step1"><input id="mail" type="email"><div role="button" id="next">Next</div></div>`;
+      document.querySelector('#next')!.addEventListener('click', () =>
+        setTimeout(() => {
+          document.querySelector('#step1')!.innerHTML = `<input id="pw" type="password"><div role="button" id="go">Sign in</div>`;
+          document.querySelector('#go')!.addEventListener('click', () => document.querySelector('#step1')!.remove());
+        }, 60),
+      );
+      expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toEqual({ status: 'success', url: location.href });
+    });
+
+    it('still reports a username that the page rejects next to an older alert', async () => {
+      document.body.innerHTML = `<p role="alert">Your session has expired.</p><div id="step1"><input id="mail" type="email"><div role="button" id="next">Next</div><p id="err" class="error"></p></div>`;
+      document.querySelector('#next')!.addEventListener('click', () => {
+        document.querySelector('p[role="alert"]')!.remove();
+        document.querySelector('#err')!.textContent = 'No account for this email';
+      });
+      expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toEqual({ status: 'failed', url: location.href, reason: 'identifier_rejected', hint: 'No account for this email' });
+    });
+
+    it('reports a page that navigates right away on the username step', async () => {
+      document.body.innerHTML = `<form><input id="mail" type="email"><button id="next" type="button">Next</button></form>`;
+      document.querySelector('#next')!.addEventListener('click', () => window.dispatchEvent(new Event('beforeunload')));
+      expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toMatchObject({ status: 'submitted', hint: expect.stringContaining('after the username step') });
+    });
+
+    it('presses Enter in the username field when its button is gone by the time it submits', async () => {
+      document.body.innerHTML = `<div id="step1"><input id="mail" type="email"><div role="button" id="next">Next</div></div>`;
+      const mail = document.querySelector('#mail')!;
+      mail.addEventListener('input', () => document.querySelector('#next')?.remove());
+      mail.addEventListener('keydown', (e) => {
+        if ((e as KeyboardEvent).key !== 'Enter') return;
+        document.querySelector('#step1')!.innerHTML = `<input id="pw" type="password"><div role="button" id="go">Sign in</div>`;
+        document.querySelector('#go')!.addEventListener('click', () => document.querySelector('#step1')!.remove());
+      });
+      expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toEqual({ status: 'success', url: location.href });
+    });
+
+    it('hands the login to a human, without a failure, when no password step follows the username', async () => {
+      document.body.innerHTML = `<div id="step1"><input id="mail" type="email"><div role="button" id="next">Next</div></div>`;
+      expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toMatchObject({ status: 'needs_human', reason: 'password_step_timeout', hint: expect.stringContaining('single sign-on') });
+    });
   });
 
   it('presses Enter when there is nothing to click and fills only the password when there is no username field', async () => {

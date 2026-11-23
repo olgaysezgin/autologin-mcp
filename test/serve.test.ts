@@ -58,6 +58,8 @@ describe('createDefaultDeps', () => {
     };
     await report('success');
     expect(deps.results.get('app')).toEqual([expect.objectContaining({ status: 'success', via: 'bridge' })]);
+    for (let i = 0; i < 3; i += 1) await report('needs_human');
+    expect(deps.limiter.isBlocked('app')).toBe(false);
     await report('failed');
     await report('error');
     expect(deps.limiter.isBlocked('app')).toBe(false);

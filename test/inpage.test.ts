@@ -40,9 +40,21 @@ describe('detect', () => {
 
   it('finds an identifier-first step and tags its field and continue button', () => {
     document.body.innerHTML = `<form><input id="email" type="email" name="email"><button id="next">Next</button></form>`;
-    expect(detect()).toEqual({ found: false, hasUsername: true, hasSubmit: true, step: 'identifier' });
+    expect(detect()).toEqual({ found: false, hasUsername: true, hasSubmit: true, step: 'identifier', nextButton: true });
     expect(roleOf('#email')).toBe('username');
     expect(roleOf('#next')).toBe('submit');
+  });
+
+  it('does not take an identifier step when an explicit username selector matches nothing usable', () => {
+    document.body.innerHTML = `<form><input id="email" type="email"><button>Next</button></form>`;
+    expect(detect({ selectors: { username: '#missing' } })).toEqual({ found: false, hasUsername: false, hasSubmit: false });
+  });
+
+  it('tells a Next / Continue button from a Log in button on an identifier step', () => {
+    document.body.innerHTML = `<form><input type="email"><input type="submit" value="Devam et"></form>`;
+    expect(detect()).toMatchObject({ step: 'identifier', nextButton: true });
+    document.body.innerHTML = `<form><input type="email"><button>Log in</button></form>`;
+    expect(detect()).toMatchObject({ step: 'identifier', nextButton: false });
   });
 
   it('does not mistake a newsletter form for an identifier-first login', () => {

@@ -31,6 +31,7 @@ export type LoginStatus =
   | 'origin_mismatch'
   | 'browser_not_connected'
   | 'rate_limited'
+  | 'needs_human'
   | 'error';
 
 export interface LoginResult {
@@ -58,6 +59,12 @@ export interface LoginTiming {
 }
 
 export const DEFAULT_TIMING: LoginTiming = { detectTimeoutMs: 5_000, verifyTimeoutMs: 10_000, pollMs: 250, earlyFailAfterMs: 1_500 };
+
+/** How long an identifier step with a Next / Continue button must stay before the username is sent. */
+export const identifierSettleMs = (timing: { detectTimeoutMs: number; pollMs: number }): number => Math.min(timing.detectTimeoutMs, 4 * timing.pollMs);
+
+export const PASSWORD_STEP_HINT =
+  'The page did not ask for a password after the username step. It may use single sign-on, a passkey or a second factor, so a human has to finish this login.';
 
 export interface Clock {
   now(): number;
@@ -117,8 +124,22 @@ export async function performLogin(
 
   try {
     const detectStart = clock.now();
+    const settleMs = identifierSettleMs(timing);
+    let identifierSince: number | null = null;
     let detected = await detect();
-    while (!detected?.found && detected?.step !== 'identifier' && !detected?.error && clock.now() - detectStart < timing.detectTimeoutMs) {
+    // Wait for a password field. An identifier step (username + Next) counts only once it has stayed for
+    // the settle time; with a Log in / Sign in button, only after the whole detect time, since a one-page
+    // form may still be rendering its password field.
+    for (;;) {
+      if (detected?.found || detected?.error) break;
+      const now = clock.now();
+      if (detected?.step === 'identifier') {
+        identifierSince ??= now;
+        if (detected.nextButton && now - identifierSince >= settleMs) break;
+      } else {
+        identifierSince = null;
+      }
+      if (now - detectStart >= timing.detectTimeoutMs) break;
       await clock.sleep(timing.pollMs);
       detected = await detect();
     }
@@ -127,6 +148,8 @@ export async function performLogin(
         return { status: 'no_login_form', ...base, url: page.url(), hint: detected?.error ?? 'No visible password field was found on the page.' };
       }
       // Identifier-first login: send the username, then wait for the page to ask for the password.
+      // A message already on the page (say "Your session has expired") is not an answer to the username.
+      const beforeStep = await state();
       await page.bringToFront().catch(() => undefined);
       await typeInto(page, 'username', profile.username);
       await submitForm(page, detected.hasSubmit);
@@ -134,21 +157,17 @@ export async function performLogin(
       let next = await detect();
       while (!next?.found) {
         const current = await state();
-        if (current?.errorText) {
-          return { status: 'failed', ...base, url: page.url(), reason: 'identifier_rejected', hint: current.errorText };
+        const newError = current?.errorText != null && current.errorText !== beforeStep?.errorText;
+        if (newError && clock.now() - stepStart >= timing.earlyFailAfterMs) {
+          return { status: 'failed', ...base, url: page.url(), reason: 'identifier_rejected', hint: current.errorText! };
         }
         if (clock.now() - stepStart >= timing.detectTimeoutMs) break;
         await clock.sleep(timing.pollMs);
         next = await detect();
       }
       if (!next?.found) {
-        return {
-          status: 'failed',
-          ...base,
-          url: page.url(),
-          reason: 'password_step_timeout',
-          hint: 'The page did not ask for a password after the username step. It may use single sign-on or a second factor, so a human has to finish this login.',
-        };
+        // No password was sent, so this is not a failed login (and does not count toward the rate limit).
+        return { status: 'needs_human', ...base, url: page.url(), reason: 'password_step_timeout', hint: PASSWORD_STEP_HINT };
       }
       detected = next;
     }

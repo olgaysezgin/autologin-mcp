@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Staggered form</title></head>
+<body>
+  <!-- An ordinary one-page login whose password field mounts 600 ms after the email field and the button
+       (a lazily loaded component). It must be filled as one form, not as an identifier-first page. -->
+  <div id="login">
+    <input id="user" type="email" name="email" autocomplete="username">
+    <span id="slot"></span>
+    <div role="button" id="go" tabindex="0">Log in</div>
+    <p id="err" class="error" style="display:none"></p>
+  </div>
+  <div id="home" style="display:none">Welcome</div>
+  <script>
+    window.submits = 0;
+    setTimeout(() => {
+      document.getElementById('slot').innerHTML = '<input id="pass" type="password" name="password" autocomplete="current-password">';
+    }, 600);
+    document.getElementById('go').addEventListener('click', async () => {
+      window.submits += 1;
+      const pass = document.getElementById('pass');
+      const body = JSON.stringify({ username: document.getElementById('user').value, password: pass ? pass.value : '' });
+      const res = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+      if (res.ok) {
+        document.getElementById('login').remove();
+        document.getElementById('home').style.display = 'block';
+      } else {
+        const err = document.getElementById('err');
+        err.textContent = pass && pass.value ? 'Invalid credentials' : 'Password is required';
+        err.style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>

@@ -4,7 +4,9 @@ Every version below is the same version in `package.json`, the git tag `v<versio
 
 ## Unreleased
 
-- Identifier-first logins: when a page asks for the email or username first and swaps in the password field after Continue/Next, the login now fills both steps in CDP and bridge mode. A newsletter form with an email field is not mistaken for one. `failed` gains `reason: identifier_rejected` and `reason: password_step_timeout`, both documented in the tools and troubleshooting pages.
+- Identifier-first logins ([#3](https://github.com/olgaysezgin/autologin-mcp/pull/3), contributed by 00xmorty): when a page asks for the email or username first and swaps in the password field after Next, Continue or Sign in, the login now fills both steps in CDP and bridge mode. A newsletter or comment form with an email field is not mistaken for one. A page that rejects the username returns `failed` with `reason: identifier_rejected`.
+- Normal one-page forms are not affected: the username is sent alone only after a Next / Continue step stayed for a second, or a Log in / Sign in step for the whole detect time, so a form whose password field renders late is still filled in one submit. A message that was on the page before the username step (such as "Your session has expired") is not taken as a rejection.
+- New status `needs_human` (`reason: password_step_timeout`): no password field followed the username step, typically single sign-on, a passkey or a second factor. It does not count toward the rate limit, and the agent is told to hand over to the user instead of retrying.
 
 ## 1.1.0 - 2026-11-23
 

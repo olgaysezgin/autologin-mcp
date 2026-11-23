@@ -15,7 +15,7 @@ export interface BridgeTiming {
   earlyFailAfterMs: number;
 }
 
-export type BridgeStatus = 'success' | 'submitted' | 'failed' | 'no_login_form' | 'error';
+export type BridgeStatus = 'success' | 'submitted' | 'failed' | 'no_login_form' | 'needs_human' | 'error';
 
 export interface BridgeResult {
   status: BridgeStatus;
@@ -43,14 +43,29 @@ export async function bridgeLogin(inpage: typeof autologinInpage, creds: BridgeC
 
   try {
     const startedAt = Date.now();
+    // Same rules as the CDP engine (identifierSettleMs): an identifier step with a Next button counts once it
+    // has stayed for the settle time; with a Log in / Sign in button, only after the whole detect time.
+    const settleMs = Math.min(timing.detectTimeoutMs, 4 * timing.pollMs);
+    let identifierSince: number | null = null;
     let detected = inpage('detect', { selectors: creds.selectors }) as DetectResult;
-    while (!detected.found && detected.step !== 'identifier' && !detected.error && Date.now() - startedAt < timing.detectTimeoutMs) {
+    for (;;) {
+      if (detected.found || detected.error) break;
+      const now = Date.now();
+      if (detected.step === 'identifier') {
+        identifierSince ??= now;
+        if (detected.nextButton && now - identifierSince >= settleMs) break;
+      } else {
+        identifierSince = null;
+      }
+      if (now - startedAt >= timing.detectTimeoutMs) break;
       await sleep(timing.pollMs);
       detected = inpage('detect', { selectors: creds.selectors }) as DetectResult;
     }
     if (!detected.found) {
       if (detected.step !== 'identifier' || !detected.hasUsername) return finish('no_login_form', { hint: detected.error ?? 'No visible password field was found on the page.' });
       // Identifier-first login: send the username, then wait for the password step.
+      // A message already on the page (say "Your session has expired") is not an answer to the username.
+      const beforeStep = inpage('state', { successSelector: creds.successSelector }) as StateResult;
       const stepField = document.querySelector<HTMLInputElement>(`[${ATTR}="username"]`)!;
       window.addEventListener('beforeunload', onLeave, { once: true });
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(stepField, creds.username);
@@ -66,11 +81,13 @@ export async function bridgeLogin(inpage: typeof autologinInpage, creds: BridgeC
       while (!next.found) {
         if (leaving) return finish('submitted', { hint: 'The page navigated after the username step; run the login again on the password page.' });
         const current = inpage('state', { successSelector: creds.successSelector }) as StateResult;
-        if (current.errorText) return finish('failed', { reason: 'identifier_rejected', hint: scrub(current.errorText) });
+        const newError = current.errorText !== null && current.errorText !== beforeStep.errorText;
+        if (newError && Date.now() - stepStart >= timing.earlyFailAfterMs) return finish('failed', { reason: 'identifier_rejected', hint: scrub(current.errorText!) });
         if (Date.now() - stepStart >= timing.detectTimeoutMs) {
-          return finish('failed', {
+          // No password was sent, so this is not a failed login (and does not count toward the rate limit).
+          return finish('needs_human', {
             reason: 'password_step_timeout',
-            hint: 'The page did not ask for a password after the username step. It may use single sign-on or a second factor, so a human has to finish this login.',
+            hint: 'The page did not ask for a password after the username step. It may use single sign-on, a passkey or a second factor, so a human has to finish this login.',
           });
         }
         await new Promise<void>((resolve) => {
@@ -100,7 +117,7 @@ export async function bridgeLogin(inpage: typeof autologinInpage, creds: BridgeC
 
     window.addEventListener('beforeunload', onLeave, { once: true });
     if ((inpage('submit', {}) as SubmitResult) === 'none') {
-      const field = document.querySelector<HTMLInputElement>(`[${ATTR}="password"]`) ?? document.querySelector<HTMLInputElement>(`[${ATTR}="username"]`)!;
+      const field = document.querySelector(`[${ATTR}="password"]`)!;
       for (const type of ['keydown', 'keypress', 'keyup']) {
         field.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
       }

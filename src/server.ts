@@ -25,6 +25,7 @@ export const INSTRUCTIONS = [
   "autologin-mcp signs the browser tab you are testing into its app with credentials that stay on the user's machine; you never see them.",
   '- When a page under test shows a login form, a "session expired" message, a 401/403, or redirects to a login URL, call `login`, then continue the task. Pass `url` (the tab URL) and, when several accounts exist for the app, `profile`.',
   `- If \`login\` returns \`run_in_page\`: ${RUN_IN_PAGE_HINT} On \`submitted\`, check the page to confirm you are logged in.`,
+  '- On `needs_human`, the page wants something only a person can do (single sign-on, a passkey or a second factor): tell the user the hint and do not retry.',
   '- `list_profiles` shows which apps (root URLs) and usernames are configured; `login_status` shows the latest login outcome per profile.',
   '- Never ask the user for a password, never type credentials into a page yourself, never read files under ~/.autologin-mcp, never modify the login script, and do not inspect the login request body in network logs or read password field values.',
   `- If no profile matches: ${ADD_HINT}`,

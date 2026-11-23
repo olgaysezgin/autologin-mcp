@@ -177,18 +177,20 @@ describe('performLogin', () => {
     expect(await performLogin(broken, profile, timing, fakeClock())).toMatchObject({ status: 'error', hint: 'raw failure' });
   });
 
+  /** An identifier step with a Next button, seen long enough (5 polls of 250 ms) to act on. */
+  const identifierSettled = (): DetectResult[] =>
+    Array.from({ length: 5 }, () => ({ found: false, hasUsername: true, hasSubmit: true, step: 'identifier', nextButton: true }) as DetectResult);
+
   it('handles an identifier-first page: username first, then the password step', async () => {
-    const identifier: DetectResult = { found: false, hasUsername: true, hasSubmit: true, step: 'identifier' };
-    const page = new FakePage([identifier, FOUND], [onForm(), loggedIn]);
+    const page = new FakePage([...identifierSettled(), FOUND], [onForm(), loggedIn]);
     expect(await performLogin(page, profile, timing, fakeClock())).toEqual({ status: 'success', profile: 'app', url: 'https://app.test/login' });
     expect(page.typed).toEqual(['qa', 'qa', 'pw']);
     expect(page.calls).toContain('click:submit');
   });
 
   it('fills the username again when the password step repeats it', async () => {
-    const identifier: DetectResult = { found: false, hasUsername: true, hasSubmit: true, step: 'identifier' };
     const withUsername: DetectResult = { found: true, hasUsername: true, hasSubmit: true };
-    const page = new FakePage([identifier, withUsername], [onForm(), loggedIn]);
+    const page = new FakePage([...identifierSettled(), withUsername], [onForm(), loggedIn]);
     expect((await performLogin(page, profile, timing, fakeClock())).status).toBe('success');
     expect(page.typed).toEqual(['qa', 'qa', 'pw']);
   });
@@ -207,11 +209,59 @@ describe('performLogin', () => {
   });
 
   it('reports a timeout when the password step never appears', async () => {
-    const identifier: DetectResult = { found: false, hasUsername: true, hasSubmit: true, step: 'identifier' };
-    const page = new FakePage([identifier], [onForm()]);
+    const page = new FakePage(identifierSettled(), [onForm()]);
     const clock = fakeClock();
-    expect(await performLogin(page, profile, timing, clock)).toMatchObject({ status: 'failed', reason: 'password_step_timeout', hint: expect.stringContaining('single sign-on') });
-    expect(clock.t).toBe(1_000);
+    expect(await performLogin(page, profile, timing, clock)).toMatchObject({ status: 'needs_human', reason: 'password_step_timeout', hint: expect.stringContaining('single sign-on') });
+    expect(clock.t).toBe(2_000); // 1 s settle + 1 s for the password step
+  });
+
+  describe('identifier-first safety', () => {
+    const next: DetectResult = { found: false, hasUsername: true, hasSubmit: true, step: 'identifier', nextButton: true };
+    const final: DetectResult = { found: false, hasUsername: true, hasSubmit: true, step: 'identifier', nextButton: false };
+    const repeat = <T,>(value: T, n: number): T[] => Array.from({ length: n }, () => value);
+
+    it('waits for a password field that shows up within the detect time instead of sending the username alone', async () => {
+      const page = new FakePage([final, final, final, FOUND], [onForm(), loggedIn]);
+      expect(await performLogin(page, profile, timing, fakeClock())).toEqual({ status: 'success', profile: 'app', url: 'https://app.test/login' });
+      expect(page.typed).toEqual(['qa', 'pw']);
+      expect(page.calls.filter((c) => c === 'click:submit')).toHaveLength(1);
+    });
+
+    it('acts on a Next button only after it stayed for the settle time', async () => {
+      const page = new FakePage([next, next, FOUND], [onForm(), loggedIn]);
+      expect((await performLogin(page, profile, timing, fakeClock())).status).toBe('success');
+      expect(page.typed).toEqual(['qa', 'pw']);
+    });
+
+    it('treats a final-looking button as an identifier step once the detect time is over', async () => {
+      const clock = fakeClock();
+      const page = new FakePage([...repeat(final, 5), FOUND], [onForm(), onForm(), loggedIn]);
+      expect((await performLogin(page, profile, timing, clock)).status).toBe('success');
+      expect(page.typed).toEqual(['qa', 'qa', 'pw']);
+    });
+
+    it('ignores an error that was on the page before the username step', async () => {
+      const expired = onForm('Your session has expired');
+      const page = new FakePage([...repeat(next, 5), next, FOUND], [expired, expired, expired, loggedIn]);
+      expect(await performLogin(page, profile, timing, fakeClock())).toEqual({ status: 'success', profile: 'app', url: 'https://app.test/login' });
+    });
+
+    it('still reports a new error after the username step', async () => {
+      const page = new FakePage([...repeat(next, 5), next], [onForm('Your session has expired'), onForm('No account for this email')]);
+      expect(await performLogin(page, profile, timing, fakeClock())).toMatchObject({ status: 'failed', reason: 'identifier_rejected', hint: 'No account for this email' });
+    });
+
+    it('goes on with the username step when the tab cannot be brought to the front', async () => {
+      const page = new FakePage([...repeat(next, 5), FOUND], [onForm(), loggedIn]);
+      page.bringToFrontError = new Error('no window');
+      expect((await performLogin(page, profile, timing, fakeClock())).status).toBe('success');
+      expect(page.typed).toEqual(['qa', 'qa', 'pw']);
+    });
+
+    it('hands the login to a human, without a failure, when no password step follows', async () => {
+      const page = new FakePage([next], [onForm()]);
+      expect(await performLogin(page, profile, timing, fakeClock())).toMatchObject({ status: 'needs_human', reason: 'password_step_timeout', hint: expect.stringContaining('single sign-on') });
+    });
   });
 
   it('has sane defaults and a real clock', async () => {

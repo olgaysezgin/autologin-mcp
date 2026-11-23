@@ -64,7 +64,8 @@ The value it returns is the login result below. The script works once, within 60
 |---|---|---|
 | `success` | Logged in. `url` is the page after login. | Continue the task. |
 | `submitted` | The form was submitted and the page navigated before the outcome was visible (bridge mode). | Look at the page to confirm the login. |
-| `failed` | Still on the login form. `hint` carries the page's error message (password removed), `reason` the cause: `still_on_login_form`, `identifier_rejected` (the username step refused the account) or `password_step_timeout` (no password field appeared after the username, often SSO or a second factor). | Tell the user the `hint`. Retry at most once. |
+| `failed` | Still on the login form. `hint` carries the page's error message (password removed), `reason` the cause: `still_on_login_form`, or `identifier_rejected` (the username step of an identifier-first page refused the account). | Tell the user the `hint`. Retry at most once. |
+| `needs_human` | The page wants something only a person can do. Today: after the username step of an identifier-first page, no password field appeared (`reason: password_step_timeout`), typically single sign-on, a passkey or a second factor. No password was sent, so it does not count toward the rate limit. | Tell the user the `hint`. Do not retry. |
 | `no_login_form` | No visible password field was found. If `previous_login` shows a recent `success` or `submitted`, the tab is already logged in. | With `previous_login`: continue. Otherwise ask the user to set selectors for the profile. |
 | `origin_mismatch` | The URL or the page's origin does not belong to any (or the requested) profile. Nothing was filled. | Ask the user to add a profile for this site. |
 | `ambiguous_profile` | Several profiles match. `candidates` lists them. | Call `login` again with `profile`. |

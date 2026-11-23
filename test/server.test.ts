@@ -229,6 +229,11 @@ describe('MCP server', () => {
     expect((await call(c, 'login')).body).toMatchObject({ status: 'rate_limited', profile: 'app' });
   });
 
+  it('does not count needs_human toward the rate limit: no password was sent', async () => {
+    const c = await connect(makeDeps({ login: async () => ({ status: 'needs_human', reason: 'password_step_timeout' }) }));
+    for (let i = 0; i < 4; i += 1) expect((await call(c, 'login')).body).toMatchObject({ status: 'needs_human' });
+  });
+
   it('turns unexpected exceptions into redacted errors', async () => {
     const c = await connect(makeDeps({ login: async () => Promise.reject(new Error(`boom ${SECRET}`)) }));
     expect(await call(c, 'login')).toEqual({ body: { status: 'error', hint: 'boom [REDACTED]' }, isError: true });

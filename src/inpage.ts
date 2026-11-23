@@ -27,6 +27,11 @@ export interface DetectResult {
    * (identifier-first login: Google, Microsoft, Okta and other SPA logins).
    */
   step?: 'identifier';
+  /**
+   * With `step: 'identifier'`: the button says Next or Continue. A Log in / Sign in button may still
+   * belong to a one-page form whose password field has not rendered yet, so callers wait longer for it.
+   */
+  nextButton?: boolean;
   error?: string;
 }
 
@@ -45,11 +50,12 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
   const ATTR = 'data-autologin-mcp';
   const SUBMIT_TEXT =
     /^(log ?-?in|sign ?-?in|login|signin|submit|continue|giri[sş]( yap)?|oturum a[cç]|anmelden|connexion|entrar|iniciar sesi[oó]n)$/i;
-  // The button that moves an identifier-first page to its password step.
+  // The button that moves an identifier-first page to its password step: Next / Continue, or a
+  // Log in / Sign in button (which may also belong to a one-page form still rendering its password field).
   // "Submit" is deliberately absent: a comment or contact form has a username field and a Submit
   // button, and typing a login there is worse than reporting that no login form was found.
-  const IDENTIFIER_TEXT =
-    /^(log ?-?in|sign ?-?in|login|signin|continue|next|giri[sş]( yap)?|oturum a[cç]|anmelden|weiter|connexion|suivant|entrar|siguiente|iniciar sesi[oó]n)$/i;
+  const NEXT_TEXT = /^(continue|next|weiter|suivant|siguiente|continuar|devam( et)?|ileri)$/i;
+  const IDENTIFIER_TEXT = /^(log ?-?in|sign ?-?in|login|signin|giri[sş]( yap)?|oturum a[cç]|anmelden|connexion|entrar|iniciar sesi[oó]n)$/i;
   // Most specific first. Labels and field wrappers (e.g. MUI's red "Password *" label) are skipped below.
   const ERROR_SELECTORS = [
     '[role="alert"]',
@@ -82,6 +88,8 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
   const tagged = (role: string): HTMLElement | null => document.querySelector<HTMLElement>(`[${ATTR}="${role}"]`);
   const precedes = (a: Element, b: Element): boolean => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
   const text = (el: Element): string => el.textContent!.replace(/\s+/g, ' ').trim();
+  /** What a button says: an input's value, or an element's text. */
+  const label = (el: Element): string => (el instanceof HTMLInputElement ? el.value.trim() : text(el));
 
   if (action === 'state') {
     const findError = (): string | null => {
@@ -176,12 +184,12 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
       const button = selectors.submit
         ? find(selectors.submit)
         : (Array.from((identifier.form ?? document).querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]')).find(
-            (el) => visible(el) && !(el as HTMLButtonElement).disabled && IDENTIFIER_TEXT.test(el instanceof HTMLInputElement ? el.value.trim() : text(el)),
+            (el) => visible(el) && !(el as HTMLButtonElement).disabled && (NEXT_TEXT.test(label(el)) || IDENTIFIER_TEXT.test(label(el))),
           ) ?? null);
       if (!visible(button)) return { found: false, hasUsername: false, hasSubmit: false };
       identifier.setAttribute(ATTR, 'username');
       button.setAttribute(ATTR, 'submit');
-      return { found: false, hasUsername: true, hasSubmit: true, step: 'identifier' };
+      return { found: false, hasUsername: true, hasSubmit: true, step: 'identifier', nextButton: NEXT_TEXT.test(label(button)) };
     }
     password = el as HTMLInputElement;
   }

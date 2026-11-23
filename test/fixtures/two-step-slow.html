@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Two-step login after an expired session</title></head>
+<body>
+  <!-- The app sent the user back to its login page with a banner, and the Next step asks the server
+       about the account before it shows the password field. The banner is not an answer to the username. -->
+  <p id="expired" role="alert">Your session has expired. Please sign in again.</p>
+  <form id="step1">
+    <label>Email <input id="email" type="email" name="email" autocomplete="username"></label>
+    <button id="next" type="submit">Next</button>
+  </form>
+  <form id="step2" style="display:none">
+    <p id="who"></p>
+    <label>Password <input id="password" type="password" name="password" autocomplete="current-password"></label>
+    <button id="signin" type="submit">Sign in</button>
+  </form>
+  <script>
+    const step1 = document.getElementById('step1');
+    const step2 = document.getElementById('step2');
+    step1.addEventListener('submit', (e) => {
+      e.preventDefault();
+      setTimeout(() => {
+        document.getElementById('who').textContent = document.getElementById('email').value;
+        step1.style.display = 'none';
+        step2.style.display = 'block';
+      }, 400);
+    });
+    step2.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = JSON.stringify({ username: document.getElementById('email').value, password: document.getElementById('password').value });
+      const res = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body });
+      if (res.ok) {
+        document.body.innerHTML = '<h1 id="welcome">Signed in</h1>';
+      } else {
+        document.getElementById('who').insertAdjacentHTML('afterend', '<p class="error" role="alert">Invalid email or password</p>');
+      }
+    });
+  </script>
+</body>
+</html>

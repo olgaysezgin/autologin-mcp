@@ -83,6 +83,19 @@ describe('login engine in a real Chrome (auto-connect via DevToolsActivePort)', 
     expect(app.received.at(-1)).toEqual(VALID);
   });
 
+  it('fills a one-page form whose password field mounts after the email field in one submit', async () => {
+    const { tab, result } = await loginOn('staggered.html', profile());
+    expect(result).toMatchObject({ status: 'success', profile: 'app' });
+    expect(app.received.at(-1)).toEqual(VALID);
+    expect(await tab.evaluate('window.submits')).toBe(1);
+  });
+
+  it('logs into an identifier-first page behind an expired-session alert, with a slow password step', async () => {
+    const { result } = await loginOn('two-step-slow.html', profile());
+    expect(result).toMatchObject({ status: 'success', profile: 'app' });
+    expect(app.received.at(-1)).toEqual(VALID);
+  });
+
   it('works with controlled inputs that only update on input events (React-like)', async () => {
     const { result } = await loginOn('controlled.html', profile());
     expect(result.status).toBe('success');
@@ -183,6 +196,16 @@ describe('bridge mode in a real Chrome (autologin-mcp has no CDP access)', () =>
   it('handles an identifier-first page in bridge mode', async () => {
     const { result } = await bridgeOn('two-step.html', profile());
     expect(result.status).toBe('success');
+    expect(app.received.at(-1)).toEqual(VALID);
+  });
+
+  it('fills a staggered one-page form in one submit, and an identifier-first page behind an alert', async () => {
+    const staggered = await bridgeOn('staggered.html', profile());
+    expect(staggered.result.status).toBe('success');
+    expect(app.received.at(-1)).toEqual(VALID);
+    expect(await staggered.tab.evaluate('window.submits')).toBe(1);
+    const slow = await bridgeOn('two-step-slow.html', profile());
+    expect(slow.result.status).toBe('success');
     expect(app.received.at(-1)).toEqual(VALID);
   });
 

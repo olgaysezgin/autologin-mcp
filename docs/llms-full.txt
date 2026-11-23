@@ -204,6 +204,7 @@ The same detection code runs in both modes, inside the page:
 1. **Password field:** the first visible, enabled `input[type=password]`, or the element matching `<PROFILE>_PASSWORD_SELECTOR`.
 2. **Username field:** among the visible text, email and tel inputs before the password field (in the same form when there is one), the best match wins: `autocomplete="username"` or `"email"` first, then `type="email"`, then a name or id that contains user, email, login or account. `<PROFILE>_USERNAME_SELECTOR` overrides this. A form with only a password field works too.
 3. **Submit button:** the form's submit button, or a visible button whose text means "log in" (for example Log in, Sign in, Continue, Giriş yap, Anmelden, Connexion, Entrar, Iniciar sesión). `<PROFILE>_SUBMIT_SELECTOR` overrides this. With no button, autologin-mcp submits the form or presses Enter in the password field.
+4. **Identifier-first pages:** when there is no password field yet, autologin-mcp looks for a username step: a visible email, `autocomplete="username"` or user/email/login field plus a button that means Continue, Next, Log in or Sign in. It types the username, submits, and waits for the password field to appear on the same page (the login form is then filled as usual). So that a one-page form whose password field renders late is not mistaken for a username step, a Next / Continue step has to stay for a second, and a Log in / Sign in step for the whole detect time, before the username is sent alone. A newsletter form with an email field and a "Subscribe" button is not mistaken for one either. When no password field follows, the result is `needs_human`: the page probably wants single sign-on, a passkey or a second factor. This works for single-page logins that swap the form in place. A page that navigates to a second document returns `submitted` in bridge mode and has to be filled again; a login host of another site (Google, Microsoft, Okta) is still out of scope.
 
 autologin-mcp waits up to 5 seconds for a form that renders late. In bridge mode, fields are filled through the native value setter followed by `input` and `change` events, which is what React, Vue and Angular controlled inputs listen to. In CDP mode, autologin-mcp focuses each field and inserts the text through the browser's own input pipeline (`Input.insertText`), then clicks the submit button with a real mouse event.
 
@@ -402,7 +403,8 @@ The value it returns is the login result below. The script works once, within 60
 |---|---|---|
 | `success` | Logged in. `url` is the page after login. | Continue the task. |
 | `submitted` | The form was submitted and the page navigated before the outcome was visible (bridge mode). | Look at the page to confirm the login. |
-| `failed` | Still on the login form. `hint` carries the page's error message (password removed), `reason` the cause. | Tell the user the `hint`. Retry at most once. |
+| `failed` | Still on the login form. `hint` carries the page's error message (password removed), `reason` the cause: `still_on_login_form`, or `identifier_rejected` (the username step of an identifier-first page refused the account). | Tell the user the `hint`. Retry at most once. |
+| `needs_human` | The page wants something only a person can do. Today: after the username step of an identifier-first page, no password field appeared (`reason: password_step_timeout`), typically single sign-on, a passkey or a second factor. No password was sent, so it does not count toward the rate limit. | Tell the user the `hint`. Do not retry. |
 | `no_login_form` | No visible password field was found. If `previous_login` shows a recent `success` or `submitted`, the tab is already logged in. | With `previous_login`: continue. Otherwise ask the user to set selectors for the profile. |
 | `origin_mismatch` | The URL or the page's origin does not belong to any (or the requested) profile. Nothing was filled. | Ask the user to add a profile for this site. |
 | `ambiguous_profile` | Several profiles match. `candidates` lists them. | Call `login` again with `profile`. |
@@ -736,6 +738,21 @@ No visible password field was found within 5 seconds.
 - If the result has `previous_login` with `success` or `submitted`, the tab is already logged in. This usually means the agent called `login` again after its JavaScript call was cut off. Nothing to fix.
 - If the login form is inside an iframe, a shadow root or behind a "Log in" button, it is not supported yet. Open the form first, or see the roadmap.
 - If the form is unusual, set `<PROFILE>_PASSWORD_SELECTOR` (and the other selectors) for the profile. See [Configuration](configuration.md#profiles).
+
+## The page asks for the username first
+
+An identifier-first login (email, then password, on the same page) is filled in two steps: autologin-mcp types the username, presses the button and waits up to 5 seconds for the password field.
+
+Before it sends the username alone, autologin-mcp makes sure the page really is a username step, so a normal form whose password field renders a little late is still filled in one go:
+
+- With a **Next** or **Continue** button, the username step has to stay on the page for one second.
+- With a **Log in** or **Sign in** button, autologin-mcp first waits the whole detect time (5 seconds) for a password field.
+
+What the results mean:
+
+- `needs_human` with `reason: password_step_timeout`: no password field appeared after the username. The page probably uses single sign-on, a passkey or a second factor, and a person has to finish the login. No password was sent, and the result does not count toward the rate limit. If the page navigated to a second document instead, run `login` again on the password page.
+- `failed` with `reason: identifier_rejected`: the page showed a new message after the username, for example "No account for this email"; the `hint` has it. Messages that were already on the page before, such as "Your session has expired", are ignored.
+- If the continue button has unusual text, set `<PROFILE>_SUBMIT_SELECTOR`.
 
 ## `failed` although the credentials are right
 
