@@ -98,7 +98,8 @@ export async function bridgeLogin(
       const { username } = await credentials();
       // The page may have re-rendered while the credentials were on their way: tag the step again.
       inpage('detect', { selectors: creds.selectors });
-      const stepField = document.querySelector<HTMLInputElement>(`[${ATTR}="username"]`)!;
+      const stepField = document.querySelector<HTMLInputElement>(`[${ATTR}="username"]`);
+      if (stepField === null) return finish('no_login_form', { hint: 'The username step went away while the credentials were on their way; nothing was typed.' });
       window.addEventListener('beforeunload', onLeave, { once: true });
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(stepField, username);
       stepField.dispatchEvent(new Event('input', { bubbles: true }));

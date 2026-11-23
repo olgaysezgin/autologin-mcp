@@ -123,7 +123,8 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
     const errorText = findError();
     // A field for a one-time code (an authenticator app, SMS or email code): a second factor.
     // Only clear names: a bare "code" or "securityCode" is as likely a promo code or a card's CVV after login.
-    const CODE_FIELD = /^(otp|totp|one[-_]?time[-_]?(code|password)|verification[-_]?code|(otp|totp|mfa|2fa|two[-_]?factor)[-_]?code)$/i;
+    // The last part of a name counts: Devise's user[otp_attempt], django-two-factor's token-otp_token.
+    const CODE_FIELD = /(^|[[-])(otp|totp|one[-_]?time[-_]?(code|password)|verification[-_]?code|(otp|totp|mfa|2fa|two[-_]?factor)[-_]?(code|token|attempt))\]?$/i;
     const codeVisible = Array.from(document.querySelectorAll('input')).some(
       (el) =>
         usable(el) &&

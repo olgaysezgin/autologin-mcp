@@ -373,7 +373,7 @@ describe('pages a person has to finish: no false alarms (#2 review)', () => {
       document.body.innerHTML = markup;
       expect(state()).toEqual({ ready: true, passwordVisible: false, success: false, errorText: null });
     }
-    for (const markup of ['<input name="otp">', '<input id="totp_code">', '<input name="mfaCode">', '<input name="one_time_code">', '<input autocomplete="one-time-code" name="c">']) {
+    for (const markup of ['<input name="otp">', '<input id="totp_code">', '<input name="mfaCode">', '<input name="one_time_code">', '<input autocomplete="one-time-code" name="c">', '<input name="user[otp_attempt]">', '<input name="token-otp_token">']) {
       document.body.innerHTML = markup;
       expect(state()).toMatchObject({ codeVisible: true });
     }

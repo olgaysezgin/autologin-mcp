@@ -2,7 +2,7 @@
 
 Every version below is the same version in `package.json`, the git tag `v<version>`, the npm package and the GitHub release. The release workflow refuses to publish when they disagree.
 
-## Unreleased
+## 1.3.0 - 2026-11-23
 
 - Pages a person has to finish are recognised and returned as `needs_human` with a reason, instead of `no_login_form`, `failed` or a misleading `success` ([#2](https://github.com/olgaysezgin/autologin-mcp/issues/2), proposed by mrsarac): `sso` (a tab on a known single sign-on provider, or a login page with only "Sign in with ..." buttons), `passkey`, `captcha`, and `mfa_required` (a one-time-code field after the password). None of them counts toward the rate limit.
 - Bridge mode asks for the credentials only when it is about to type into a form it found. A page without a login form, or one a person has to finish, never receives them. The profile's selectors (not secret) now come with the filler script.

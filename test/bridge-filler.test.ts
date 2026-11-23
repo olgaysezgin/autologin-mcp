@@ -345,6 +345,18 @@ describe('bridgeLogin: credentials only when there is a form to fill (#2)', () =
 });
 
 describe('bridgeLogin: fields re-rendered while the credentials arrive (#2 review)', () => {
+  it('types nothing when the username step went away meanwhile', async () => {
+    document.body.innerHTML = `<div id="step1"><input id="mail" type="email"><div role="button" id="next">Next</div></div>`;
+    const creds = {
+      selectors: {},
+      load: vi.fn(async () => {
+        document.querySelector('#step1')!.remove();
+        return { username: CREDS.username, password: CREDS.password };
+      }),
+    };
+    expect(await bridgeLogin(autologinInpage, creds, TIMING)).toMatchObject({ status: 'no_login_form', hint: expect.stringContaining('nothing was typed') });
+  });
+
   it('types nothing when the form went away meanwhile', async () => {
     app(() => undefined);
     const creds = {
