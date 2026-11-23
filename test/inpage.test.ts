@@ -50,6 +50,11 @@ describe('detect', () => {
     expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false });
   });
 
+  it('does not treat a comment form with a Submit button as an identifier-first login', () => {
+    document.body.innerHTML = `<form><input id="nick" name="username" type="text"><button type="submit">Submit</button></form>`;
+    expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false });
+  });
+
   it('honours explicit selectors on the identifier step and stays strict about a missing password selector', () => {
     document.body.innerHTML = `<input id="who" type="text"><a id="go">Continue</a>`;
     expect(detect({ selectors: { username: '#who', submit: '#go' } })).toMatchObject({ step: 'identifier', hasUsername: true, hasSubmit: true });

@@ -46,8 +46,10 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
   const SUBMIT_TEXT =
     /^(log ?-?in|sign ?-?in|login|signin|submit|continue|giri[sş]( yap)?|oturum a[cç]|anmelden|connexion|entrar|iniciar sesi[oó]n)$/i;
   // The button that moves an identifier-first page to its password step.
+  // "Submit" is deliberately absent: a comment or contact form has a username field and a Submit
+  // button, and typing a login there is worse than reporting that no login form was found.
   const IDENTIFIER_TEXT =
-    /^(log ?-?in|sign ?-?in|login|signin|submit|continue|next|giri[sş]( yap)?|oturum a[cç]|anmelden|weiter|connexion|suivant|entrar|siguiente|iniciar sesi[oó]n)$/i;
+    /^(log ?-?in|sign ?-?in|login|signin|continue|next|giri[sş]( yap)?|oturum a[cç]|anmelden|weiter|connexion|suivant|entrar|siguiente|iniciar sesi[oó]n)$/i;
   // Most specific first. Labels and field wrappers (e.g. MUI's red "Password *" label) are skipped below.
   const ERROR_SELECTORS = [
     '[role="alert"]',
