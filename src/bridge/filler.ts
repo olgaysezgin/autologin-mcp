@@ -65,8 +65,41 @@ export async function bridgeLogin(
   // Same words as TOTP_REJECTED_HINT in src/login/engine.ts.
   const TOTP_REJECTED_HINT =
     "The page did not accept the one-time code made from the profile's TOTP secret. Check the secret, and that this computer's clock is right.";
-  const finish = (status: BridgeStatus, extra: { reason?: string; hint?: string } = {}): BridgeResult => ({ status, url: location.href, ...extra });
+  // The URL is scrubbed too: a GET form puts the one-time code there.
+  const finish = (status: BridgeStatus, extra: { reason?: string; hint?: string } = {}): BridgeResult => ({ status, url: scrub(location.href), ...extra });
   const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+  const mfaRequired = (): BridgeResult => finish('needs_human', { reason: 'mfa_required', hint: NEEDS_HUMAN_HINTS.mfa_required });
+  const fill = (role: string, value: string): void => {
+    const field = document.querySelector<HTMLInputElement>(`[${ATTR}="${role}"]`)!;
+    field.focus();
+    // The native setter plus input/change events is what React, Vue and Angular listen to.
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, value);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  const pressEnter = (role: string): void => {
+    const field = document.querySelector(`[${ATTR}="${role}"]`)!;
+    for (const type of ['keydown', 'keypress', 'keyup']) {
+      field.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+    }
+  };
+  const clearFields = (): void => {
+    inpage('clear', { role: 'password' });
+    if (sentCode !== null) inpage('clear', { role: 'code' });
+  };
+  /**
+   * A second factor the profile has a TOTP secret for: one code per login, asked for only now (the page shows the
+   * code step), typed like the password. The page may re-render while the code is on its way, so the field is
+   * tagged once the code is here.
+   */
+  const sendCode = async (loadCode: () => Promise<string>): Promise<BridgeResult | null> => {
+    const code = await loadCode();
+    if (!(inpage('code', {}) as CodeResult).found) return mfaRequired();
+    sentCode = code;
+    fill('code', code);
+    if ((inpage('submit', {}) as SubmitResult) === 'none') pressEnter('code');
+    return null;
+  };
   let leaving = false;
   let wake = (): void => undefined;
   const onLeave = (): void => {
@@ -84,7 +117,8 @@ export async function bridgeLogin(
     let identifierSince: number | null = null;
     let detected = inpage('detect', { selectors: creds.selectors }) as DetectResult;
     for (;;) {
-      if (detected.found || detected.error) break;
+      // A code page (the app navigated after the password) needs no waiting.
+      if (detected.found || detected.error || detected.step === 'code') break;
       const now = Date.now();
       if (detected.step === 'identifier') {
         identifierSince ??= now;
@@ -96,7 +130,9 @@ export async function bridgeLogin(
       await sleep(timing.pollMs);
       detected = inpage('detect', { selectors: creds.selectors }) as DetectResult;
     }
-    if (!detected.found) {
+    const codePage = detected.step === 'code';
+    if (codePage && creds.code === undefined) return mfaRequired();
+    if (!detected.found && !codePage) {
       if (detected.step !== 'identifier' || !detected.hasUsername) {
         if (detected.blocker) return finish('needs_human', { reason: detected.blocker, hint: NEEDS_HUMAN_HINTS[detected.blocker] });
         return finish('no_login_form', { hint: detected.error ?? 'No visible password field was found on the page.' });
@@ -146,28 +182,22 @@ export async function bridgeLogin(
     }
 
     const before = inpage('state', { successSelector: creds.successSelector }) as StateResult;
-    const fill = (role: string, value: string): void => {
-      const field = document.querySelector<HTMLInputElement>(`[${ATTR}="${role}"]`)!;
-      field.focus();
-      // The native setter plus input/change events is what React, Vue and Angular listen to.
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, value);
-      field.dispatchEvent(new Event('input', { bubbles: true }));
-      field.dispatchEvent(new Event('change', { bubbles: true }));
-    };
-    const { username, password } = await credentials();
-    // The page may have re-rendered while the credentials were on their way: tag the form again.
-    const again = inpage('detect', { selectors: creds.selectors }) as DetectResult;
-    if (!again.found) return finish('no_login_form', { hint: 'The login form went away while the credentials were on their way; nothing was typed.' });
-    detected = again;
-    if (detected.hasUsername) fill('username', username);
-    fill('password', password);
+    if (codePage) {
+      // Only the code is asked for here: the password went in on the page before, so the credentials are not.
+      window.addEventListener('beforeunload', onLeave, { once: true });
+      const stopped = await sendCode(creds.code!);
+      if (stopped !== null) return stopped;
+    } else {
+      const { username, password } = await credentials();
+      // The page may have re-rendered while the credentials were on their way: tag the form again.
+      const again = inpage('detect', { selectors: creds.selectors }) as DetectResult;
+      if (!again.found) return finish('no_login_form', { hint: 'The login form went away while the credentials were on their way; nothing was typed.' });
+      detected = again;
+      if (detected.hasUsername) fill('username', username);
+      fill('password', password);
 
-    window.addEventListener('beforeunload', onLeave, { once: true });
-    if ((inpage('submit', {}) as SubmitResult) === 'none') {
-      const field = document.querySelector(`[${ATTR}="password"]`)!;
-      for (const type of ['keydown', 'keypress', 'keyup']) {
-        field.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
-      }
+      window.addEventListener('beforeunload', onLeave, { once: true });
+      if ((inpage('submit', {}) as SubmitResult) === 'none') pressEnter('password');
     }
 
     // Each step (the password, then a one-time code) gets its own wait and its own "message before".
@@ -176,12 +206,6 @@ export async function bridgeLogin(
     let goneStreak = 0;
     let lookedAgain = false;
     let last = before;
-    const pressEnter = (role: string): void => {
-      const field = document.querySelector(`[${ATTR}="${role}"]`)!;
-      for (const type of ['keydown', 'keypress', 'keyup']) {
-        field.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
-      }
-    };
     for (;;) {
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, timing.pollMs);
@@ -191,23 +215,17 @@ export async function bridgeLogin(
         };
       });
       if (leaving) {
-        return finish('submitted', { hint: 'The page navigated after the login form was submitted; check that the app now shows you as logged in.' });
+        return finish('submitted', { hint: 'The page navigated after the login form was submitted; check that the app now shows you as logged in. If it asks for a one-time code, call login again.' });
       }
       const current = inpage('state', { successSelector: creds.successSelector }) as StateResult;
       last = current;
       if (current.success) return finish('success');
       if (current.codeVisible && !current.passwordVisible) {
         goneStreak = 0;
-        if (creds.code === undefined) return finish('needs_human', { reason: 'mfa_required', hint: NEEDS_HUMAN_HINTS.mfa_required });
+        if (creds.code === undefined) return mfaRequired();
         if (sentCode === null) {
-          // A second factor the profile has a TOTP secret for: one code, asked for now (the state above just saw
-          // the code field), typed like the password. The page may re-render while the code is on its way, so the
-          // field is tagged once the code is here.
-          const code = await creds.code();
-          if (!(inpage('code', {}) as CodeResult).found) return finish('needs_human', { reason: 'mfa_required', hint: NEEDS_HUMAN_HINTS.mfa_required });
-          sentCode = code;
-          fill('code', code);
-          if ((inpage('submit', {}) as SubmitResult) === 'none') pressEnter('code');
+          const stopped = await sendCode(creds.code);
+          if (stopped !== null) return stopped;
           stepStart = Date.now();
           stepBefore = current;
           lookedAgain = false;
@@ -229,14 +247,14 @@ export async function bridgeLogin(
         lookedAgain = true;
       }
     }
-    inpage('clear', { role: 'password' });
+    clearFields();
     if (sentCode !== null && last.codeVisible) return finish('failed', { reason: 'totp_rejected', hint: scrub(last.errorText ?? TOTP_REJECTED_HINT) });
     return finish('failed', {
       reason: 'still_on_login_form',
       hint: scrub(last.errorText ?? 'Still on the login form after submitting. Check the credentials, or set selectors for this profile.'),
     });
   } catch (error) {
-    inpage('clear', { role: 'password' });
+    clearFields();
     return finish('error', { hint: scrub(error instanceof Error ? error.message : String(error)) });
   } finally {
     window.removeEventListener('beforeunload', onLeave);
@@ -256,6 +274,7 @@ export function fillerScript(
   timing: BridgeTiming,
   noForm: NoFormContext | null = null,
   hints: { selectors: InpageSelectors; successSelector?: string; totp?: boolean } = { selectors: {} },
+  codeNonce: string | null = null,
 ): string {
   return [
     '(() => {',
@@ -276,7 +295,8 @@ export function fillerScript(
     "  throw new Error(refused.hint || refused.status || 'credentials refused');",
     '});',
     // A TOTP profile's current code, fetched only when the page shows the code step (the secret stays on the machine).
-    "const loadCode = () => fetch(base + '/v1/code/' + token, { method: 'POST' }).then(async (res) => {",
+    `const codeNonce = ${JSON.stringify(codeNonce)};`,
+    "const loadCode = () => fetch(base + '/v1/code/' + token, { method: 'POST', body: JSON.stringify({ nonce: codeNonce }) }).then(async (res) => {",
     '  const body = await res.json();',
     '  if (res.ok) return body.code;',
     "  throw new Error(body.hint || body.status || 'one-time code refused');",

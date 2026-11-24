@@ -487,3 +487,61 @@ describe('TOTP codes after the password (#1)', () => {
     expect(await bridgeLogin(autologinInpage, { ...CREDS, code: gone }, TIMING)).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
   });
 });
+
+describe('TOTP codes: review fixes (#1 review)', () => {
+  it('fills only the code on a code page of its own, never asking for the credentials', async () => {
+    document.body.innerHTML = `<form id="f"><label>Code <input name="user[otp_attempt]" autocomplete="one-time-code"></label><input type="submit" value="Verify"></form>`;
+    let typed = '';
+    document.querySelector('#f')!.addEventListener('submit', (e) => {
+      e.preventDefault();
+      typed = document.querySelector<HTMLInputElement>('input[autocomplete]')!.value;
+      document.querySelector('#f')!.remove();
+    });
+    const load = vi.fn(async () => ({ username: 'u', password: 'p' }));
+    expect(await bridgeLogin(autologinInpage, { selectors: {}, load, code: async () => '654321' }, TIMING)).toEqual({ status: 'success', url: location.href });
+    expect(typed).toBe('654321');
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  it('hands a code page to a person when its code field goes away while the code is on its way', async () => {
+    document.body.innerHTML = `<input name="otp"><button>Verify</button>`;
+    const gone = async () => {
+      document.body.innerHTML = '<p>Choose another way to sign in</p>';
+      return '123456';
+    };
+    expect(await bridgeLogin(autologinInpage, { selectors: {}, load: vi.fn(), code: gone }, TIMING)).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
+  });
+
+  it('hands a code page to a person at once without a TOTP secret', async () => {
+    document.body.innerHTML = `<input name="otp"><button>Verify</button>`;
+    const startedAt = Date.now();
+    expect(await bridgeLogin(autologinInpage, CREDS, { ...TIMING, detectTimeoutMs: 2_000 })).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+  });
+
+  it('keeps the code out of the result URL, as a GET form would carry it', async () => {
+    const original = location.href;
+    app(() => {
+      document.querySelector('#login')!.innerHTML = `<input id="otp" name="otp"><button id="verify">Verify</button>`;
+      document.querySelector('#verify')!.addEventListener('click', () => {
+        history.replaceState(null, '', `/verify?otp=${document.querySelector<HTMLInputElement>('#otp')!.value}`);
+        document.querySelector('#login')!.remove();
+      });
+    });
+    const result = await bridgeLogin(autologinInpage, { ...CREDS, code: async () => '123456' }, TIMING);
+    history.replaceState(null, '', original);
+    expect(result).toEqual({ status: 'success', url: expect.stringMatching(/\/verify\?otp=\[REDACTED\]$/) });
+  });
+
+  it('clears the code and a hidden password after a rejected code', async () => {
+    app(() => {
+      document.querySelector<HTMLElement>('#pass')!.style.display = 'none';
+      document.querySelector<HTMLElement>('#go')!.style.display = 'none';
+      document.querySelector('#login')!.insertAdjacentHTML('beforeend', `<input id="otp" name="otp"><button id="verify">Verify</button>`);
+      document.querySelector('#verify')!.addEventListener('click', () => showError('Wrong code'));
+    });
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code: async () => '123456' }, TIMING)).toMatchObject({ status: 'failed', reason: 'totp_rejected', hint: 'Wrong code' });
+    expect(document.querySelector<HTMLInputElement>('#pass')!.value).toBe('');
+    expect(document.querySelector<HTMLInputElement>('#otp')!.value).toBe('');
+  });
+});

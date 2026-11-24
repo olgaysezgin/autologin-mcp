@@ -450,3 +450,82 @@ describe('TOTP codes after the password (#1)', () => {
     expect(away.typed).toEqual(['qa', 'pw']);
   });
 });
+
+describe('TOTP codes: review fixes (#1 review)', () => {
+  const totpProfile = buildStore({ APP_URL: 'app.test', APP_USERNAME: 'qa', APP_PASSWORD: 'pw', APP_TOTP_SECRET: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ' })
+    .profiles[0] as UsableProfile;
+  const codeStep = (errorText: string | null = null): StateResult => ({ ready: true, passwordVisible: false, success: false, errorText, codeVisible: true });
+  const CODE_PAGE: DetectResult = { found: false, hasUsername: false, hasSubmit: false, step: 'code' };
+
+  /** Records each action with its role, and when the code field was tagged. */
+  class RecordingPage extends FakePage {
+    taggedAt: number | null = null;
+    constructor(
+      detects: DetectResult[],
+      states: StateResult[],
+      private readonly clock?: { t: number },
+    ) {
+      super(detects, states);
+      this.elements.add('code');
+    }
+    override async run<T>(action: InpageAction, arg?: { role?: string }): Promise<T> {
+      if (action === 'clear') this.calls.push(`clear:${arg?.role}`);
+      if (action !== 'code') return super.run<T>(action);
+      this.calls.push('code');
+      this.taggedAt = this.clock?.t ?? null;
+      return { found: true, hasSubmit: true } as T;
+    }
+  }
+
+  it('makes the code before it tags the field, so a wait for a fresh code cannot outlast the tag', async () => {
+    const clock = fakeClock();
+    clock.t = 27_500;
+    const page = new RecordingPage([FOUND], [onForm(), codeStep(), gone, gone], clock);
+    expect((await performLogin(page, totpProfile, timing, clock)).status).toBe('success');
+    expect(page.taggedAt).toBeGreaterThanOrEqual(30_000);
+  });
+
+  it('fills only the code on a code page of its own, typing no password', async () => {
+    const page = new RecordingPage([CODE_PAGE], [codeStep(), gone, gone]);
+    const clock = fakeClock();
+    expect(await performLogin(page, totpProfile, timing, clock)).toEqual({ status: 'success', profile: 'app', url: 'https://app.test/login' });
+    expect(page.typed).toEqual([totpCode(totpProfile.totp!, 0)]);
+  });
+
+  it('hands a code page to a person at once when the profile has no TOTP secret', async () => {
+    const page = new RecordingPage([CODE_PAGE], [codeStep()]);
+    const clock = fakeClock();
+    expect(await performLogin(page, profile, timing, clock)).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
+    expect(clock.t).toBe(0);
+    expect(page.typed).toEqual([]);
+  });
+
+  it('hands a code page to a person when its code field goes away while the code is made', async () => {
+    const page = new RecordingPage([CODE_PAGE], [codeStep()]);
+    page.run = (async (action: InpageAction) => {
+      if (action === 'code') return { found: false, hasSubmit: false };
+      return FakePage.prototype.run.call(page, action);
+    }) as typeof page.run;
+    expect(await performLogin(page, totpProfile, timing, fakeClock())).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
+    expect(page.typed).toEqual([]);
+  });
+
+  it('keeps the code out of the result URL, as a GET form would carry it', async () => {
+    const page = new RecordingPage([FOUND], [onForm(), codeStep(), gone, gone]);
+    let submits = 0;
+    page.onSubmit = () => {
+      submits += 1;
+      if (submits === 2) page.currentUrl = `https://app.test/verify?otp=${totpCode(totpProfile.totp!, 250)}`;
+    };
+    expect(await performLogin(page, totpProfile, timing, fakeClock())).toEqual({ status: 'success', profile: 'app', url: 'https://app.test/verify?otp=[REDACTED]' });
+  });
+
+  it('clears the code and the password after a rejected code', async () => {
+    const page = new RecordingPage([FOUND], [onForm(), codeStep(), codeStep('Wrong code')]);
+    expect(await performLogin(page, totpProfile, timing, fakeClock())).toMatchObject({ status: 'failed', reason: 'totp_rejected', hint: 'Wrong code' });
+    // typeInto clears a field before typing, so only clears after the code was typed count here.
+    const afterCode = page.calls.slice(page.calls.indexOf('focus:code'));
+    expect(afterCode).toContain('clear:password');
+    expect(afterCode).toContain('clear:code');
+  });
+});

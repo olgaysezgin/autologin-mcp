@@ -82,7 +82,7 @@ export const NO_PASSWORD_FLAG =
   '--password is not supported: it would leave the password in your shell history and the process list. Pipe it in with --password-stdin instead.';
 
 export const NO_TOTP_VALUE =
-  '--totp takes no value: it would leave the secret in your shell history. The secret is asked hidden, or piped in as the second line with --password-stdin.';
+  '--totp takes no value: a secret on the command line stays in your shell history. Put the profile name before --totp; the secret is asked hidden, or piped in as the second line with --password-stdin.';
 
 const TOTP_STDIN = 'With --totp, pipe two lines: the password, then the TOTP secret.';
 
@@ -107,7 +107,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     else if (name === '--password-stdin') flags.passwordStdin = true;
     else if (name === '--password') throw new Error(NO_PASSWORD_FLAG);
     else if (name === '--totp') {
-      if (inline !== undefined) throw new Error(NO_TOTP_VALUE);
+      // A word right after it is most likely the secret: as a profile name it would be written to the file
+      // and shown to the agent.
+      const next = argv[i + 1];
+      if (inline !== undefined || (next !== undefined && !next.startsWith('-'))) throw new Error(NO_TOTP_VALUE);
       flags.totp = true;
     }
     else if (name === '--url' || name === '--username' || name === '--package' || name === '--client') {
@@ -218,6 +221,7 @@ async function addCommand(ctx: CliContext, args: ParsedArgs): Promise<number> {
     line(ctx.stderr, text);
     return 1;
   };
+  if (args.positionals.length > 1) return fail('add takes one profile name. A password or TOTP secret is never an argument: they are asked hidden, or piped in.');
   if (args.flags.passwordStdin) return addFromStdin(ctx, args, file, fail);
   const prompter = ctx.prompter(ctx.stdin, ctx.stdout);
   try {

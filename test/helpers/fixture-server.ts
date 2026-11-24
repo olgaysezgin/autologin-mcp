@@ -49,6 +49,31 @@ export async function startFixtureServer(): Promise<FixtureServer> {
         }
         return;
       }
+      if (req.method === 'POST' && (url.pathname === '/totp-login' || url.pathname === '/totp-verify')) {
+        // totp-classic.html → totp-code.html → dashboard.html, all server-rendered.
+        const form = new URLSearchParams(await readBody(req));
+        let next: string | null = null;
+        let again = 'totp-classic.html';
+        let message = 'Invalid email or password';
+        if (url.pathname === '/totp-login') {
+          const pair = { username: form.get('email') ?? '', password: form.get('password') ?? '' };
+          received.push(pair);
+          if (pair.username === VALID.username && pair.password === VALID.password) next = '/totp-code.html';
+        } else {
+          const code = form.get('user[otp_attempt]') ?? '';
+          codes.push(code);
+          if ([-30_000, 0, 30_000].some((skew) => totpCode(TOTP, Date.now() + skew) === code)) next = '/dashboard.html';
+          again = 'totp-code.html';
+          message = 'That code is not valid';
+        }
+        if (next !== null) {
+          res.writeHead(302, { location: next }).end();
+        } else {
+          const html = await fs.readFile(path.join(FIXTURES, again), 'utf8');
+          res.writeHead(200, { 'content-type': 'text/html' }).end(html.replace('<!--ERROR-->', `<p class="error" role="alert">${message}</p>`));
+        }
+        return;
+      }
       if (req.method === 'POST' && url.pathname === '/api/totp') {
         const { code } = JSON.parse(await readBody(req)) as { code: string };
         codes.push(code);

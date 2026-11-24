@@ -377,8 +377,8 @@ describe('code: the one-time-code step after the password (#1)', () => {
     expect(autologinInpage('submit', {})).toBe('none');
   });
 
-  it('finds nothing without a clear one-time-code field, and drops tags from earlier steps', () => {
-    document.body.innerHTML = `<input name="promo_code" ${FIELD_ATTR}="password"><input autocomplete="one-time-code" style="display:none"><button>Verify</button>`;
+  it('finds nothing without a clear one-time-code field, and drops code and button tags from earlier steps', () => {
+    document.body.innerHTML = `<input name="promo_code" ${FIELD_ATTR}="code"><input autocomplete="one-time-code" style="display:none"><button ${FIELD_ATTR}="submit">Verify</button>`;
     expect(code()).toEqual({ found: false, hasSubmit: false });
     expect(document.querySelectorAll(`[${FIELD_ATTR}]`)).toHaveLength(0);
   });
@@ -388,6 +388,53 @@ describe('code: the one-time-code step after the password (#1)', () => {
     code();
     expect(autologinInpage('clear', { role: 'code' })).toBe(true);
     expect(document.querySelector('input')!.value).toBe('');
+  });
+});
+
+describe('code: review fixes (#1 review)', () => {
+  const code = () => autologinInpage('code', {});
+
+  it('keeps the password tag, so a failed code step can still clear the password', () => {
+    document.body.innerHTML = `<form><input id="u" ${FIELD_ATTR}="username"><input type="password" style="display:none" ${FIELD_ATTR}="password" value="hunter2"><input name="otp"><button type="submit">Verify</button></form>`;
+    expect(code()).toEqual({ found: true, hasSubmit: true });
+    expect(roleOf('#u')).toBe('username');
+    expect(roleOf('input[type="password"]')).toBe('password');
+    expect(autologinInpage('clear', { role: 'password' })).toBe(true);
+    expect(document.querySelector<HTMLInputElement>('input[type="password"]')!.value).toBe('');
+  });
+
+  it('only takes a Verify / Next kind of submit button in the form: never Back, Resend or Cancel', () => {
+    document.body.innerHTML = `<form><input name="token-otp_token"><button type="submit" name="wizard_goto_step" value="auth">Back</button><button type="submit">Next</button></form>`;
+    expect(code()).toEqual({ found: true, hasSubmit: true });
+    expect(document.querySelector(`[${FIELD_ATTR}="submit"]`)!.textContent).toBe('Next');
+    document.body.innerHTML = `<form><input name="otp"><button type="submit">Back</button><button type="submit">Resend code</button></form>`;
+    const onSubmit = vi.fn((e: SubmitEvent) => {
+      e.preventDefault();
+      return e.submitter;
+    });
+    document.querySelector('form')!.addEventListener('submit', onSubmit);
+    expect(code()).toEqual({ found: true, hasSubmit: false });
+    expect(autologinInpage('submit', {})).toBe('submitted');
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit.mock.results[0]!.value).toBeNull();
+  });
+
+  it('submits the code form, not the form of a hidden password field', () => {
+    document.body.innerHTML = `<form id="pw"><input type="password" style="display:none"></form><form id="c"><input name="otp"></form>`;
+    detect();
+    document.querySelector('input[type="password"]')!.setAttribute(FIELD_ATTR, 'password');
+    const submitted: string[] = [];
+    for (const form of Array.from(document.querySelectorAll('form'))) form.addEventListener('submit', (e) => (e.preventDefault(), submitted.push(form.id)));
+    expect(code()).toEqual({ found: true, hasSubmit: false });
+    expect(autologinInpage('submit', {})).toBe('submitted');
+    expect(submitted).toEqual(['c']);
+  });
+
+  it('reports a page of its own that asks only for a one-time code as a code step', () => {
+    document.body.innerHTML = `<form method="post"><label>Code <input name="user[otp_attempt]" autocomplete="one-time-code"></label><input type="submit" value="Verify"></form>`;
+    expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false, step: 'code' });
+    document.body.innerHTML = `<input name="otp" style="display:none"><button>Sign in with Google</button>`;
+    expect(detect()).toMatchObject({ blocker: 'sso' });
   });
 });
 

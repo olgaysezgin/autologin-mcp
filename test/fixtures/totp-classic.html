@@ -1,0 +1,13 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Server-rendered login with an authenticator code</title></head>
+<body>
+  <!-- The password form posts to the server, which sends the browser to a code page of its own (totp-code.html). -->
+  <form method="post" action="/totp-login">
+    <!--ERROR-->
+    <label>Email <input type="email" name="email" autocomplete="username"></label>
+    <label>Password <input type="password" name="password" autocomplete="current-password"></label>
+    <button type="submit">Sign in</button>
+  </form>
+</body>
+</html>

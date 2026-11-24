@@ -9,7 +9,7 @@ description: autologin-mcp command-line reference - install, uninstall, add (als
 npx autologin-mcp                    Run the MCP server on stdio (what Claude Code starts)
 npx autologin-mcp install [-y] [--dry-run] [--package <spec>]
 npx autologin-mcp uninstall [-y] [--dry-run] [--purge]
-npx autologin-mcp add [name] [--url <root-url>] [--username <user>] [-y]
+npx autologin-mcp add [name] [--url <root-url>] [--username <user>] [--totp] [-y]
 npx autologin-mcp add <name> --url <root-url> --username <user> --password-stdin [--totp] [-y]
 npx autologin-mcp list
 npx autologin-mcp remove <name> [-y]
@@ -60,7 +60,7 @@ npx autologin-mcp add staging --url staging.example.com --username qa@example.co
 npx autologin-mcp add staging --totp                   # also asks for a TOTP secret, hidden
 ```
 
-`--totp` adds the account's authenticator secret (base32, or an `otpauth://totp/...` URI), so autologin-mcp can fill the one-time code after the password. It takes no value on the command line, where it would stay in your shell history. See [Configuration](configuration.md#authenticator-codes-totp).
+`--totp` adds the account's authenticator secret (base32, or an `otpauth://totp/...` URI), so autologin-mcp can fill the one-time code after the password. It takes no value on the command line, where it would stay in your shell history: put the profile name before `--totp`. See [Configuration](configuration.md#authenticator-codes-totp).
 
 ### Scripts and CI: `--password-stdin`
 

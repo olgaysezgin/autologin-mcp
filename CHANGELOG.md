@@ -5,8 +5,10 @@ Every version below is the same version in `package.json`, the git tag `v<versio
 ## 1.4.0 - 2026-11-24
 
 - Authenticator codes (TOTP, [#1](https://github.com/olgaysezgin/autologin-mcp/issues/1), proposed by mrsarac): a profile can hold the account's TOTP secret (`<PROFILE>_TOTP_SECRET`, base32 or an `otpauth://totp/...` URI with its algorithm, digits and period). When the page asks for a one-time code after the password, autologin-mcp makes the current code on this machine (RFC 6238) and fills it, in CDP and bridge mode. The secret never leaves autologin-mcp: in bridge mode the page asks for the current code once, when it shows the code step, under the same origin check as the credentials.
-- A code the page rejects returns `failed` with `reason: totp_rejected` and counts toward the rate limit. When less than 3 seconds of the current code are left, autologin-mcp waits for the next one.
-- `add --totp` asks for the TOTP secret hidden, or reads it as a second piped line with `--password-stdin`. `list` and `list_profiles` show which profiles have one; the secret and the code are redacted from every result.
+- A code the page rejects returns `failed` with `reason: totp_rejected` and counts toward the rate limit; the code and password fields are cleared. When less than 3 seconds of the current code are left, autologin-mcp waits for the next one.
+- A code page of its own (a server-rendered app that navigates after the password) is a code step too: CDP mode follows the tab there, and in bridge mode the next `login` call on that page fills just the code. Without a TOTP secret such a page now returns `needs_human` with `reason: mfa_required` instead of `no_login_form`.
+- In bridge mode only the login's own script can ask for the code: the code endpoint wants a key that only that script carries, and answers no more once the login reported its outcome. A started script also gets a fresh time window, so a long login with a code step does not run out.
+- `add --totp` asks for the TOTP secret hidden, or reads it as a second piped line with `--password-stdin`. A value after `--totp` is refused, so a secret cannot end up as the profile name or in the shell history. `list` and `list_profiles` show which profiles have one; the secret and the code are redacted from every result.
 - Without a TOTP secret, the code step is handed to a person as before (`needs_human`, `reason: mfa_required`).
 
 ## 1.3.3 - 2026-11-24

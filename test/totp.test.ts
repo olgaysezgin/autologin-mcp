@@ -72,6 +72,13 @@ describe('parseTotpSecret', () => {
     expect(parseTotpSecret(`otpauth://totp/x?secret=${SHA1_BASE32}&digits=4`)).toMatchObject({ ok: false, error: expect.stringContaining('digits') });
     expect(parseTotpSecret(`otpauth://totp/x?secret=${SHA1_BASE32}&period=0`)).toMatchObject({ ok: false, error: expect.stringContaining('period') });
   });
+
+  it('refuses secrets shorter than 80 bits, which no authenticator setup uses (#1 review)', () => {
+    expect(parseTotpSecret('A')).toEqual({ ok: false, error: 'the secret is too short: an authenticator secret has at least 16 base32 characters' });
+    expect(parseTotpSecret('MZXW6YTB')).toMatchObject({ ok: false, error: expect.stringContaining('too short') });
+    expect(parseTotpSecret('otpauth://totp/x?secret=MZXW6YTB')).toMatchObject({ ok: false, error: expect.stringContaining('too short') });
+    expect(parseTotpSecret('JBSWY3DPEHPK3PXP')).toMatchObject({ ok: true });
+  });
 });
 
 describe('freshTotpCode', () => {
@@ -103,9 +110,14 @@ describe('freshTotpCode', () => {
 
 describe('secretForms', () => {
   it('lists the forms a secret can show up in, for redaction', () => {
-    expect(secretForms(' gezd gnbv-gy3t ')).toEqual(['gezd gnbv-gy3t', 'gezdgnbvgy3t']);
-    expect(secretForms(SHA1_BASE32)).toEqual([SHA1_BASE32]);
-    expect(secretForms(`otpauth://totp/x?secret=${SHA1_BASE32}&issuer=Ex`)).toEqual([`otpauth://totp/x?secret=${SHA1_BASE32}&issuer=Ex`, SHA1_BASE32]);
+    expect(secretForms(' gezd gnbv-gy3t ')).toEqual(['gezd gnbv-gy3t', 'gezdgnbvgy3t', 'GEZDGNBVGY3T']);
+    expect(secretForms(SHA1_BASE32)).toEqual([SHA1_BASE32, SHA1_BASE32.toLowerCase()]);
+    expect(secretForms(SHA1_BASE32.toLowerCase())).toEqual([SHA1_BASE32.toLowerCase(), SHA1_BASE32]);
+    expect(secretForms(`otpauth://totp/x?secret=${SHA1_BASE32}&issuer=Ex`)).toEqual([
+      `otpauth://totp/x?secret=${SHA1_BASE32}&issuer=Ex`,
+      SHA1_BASE32,
+      SHA1_BASE32.toLowerCase(),
+    ]);
     expect(secretForms('otpauth:// bad')).toEqual(['otpauth:// bad', 'otpauth://bad']);
     expect(secretForms('otpauth://totp/x')).toEqual(['otpauth://totp/x']);
     expect(secretForms('  ')).toEqual([]);

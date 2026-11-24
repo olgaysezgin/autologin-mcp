@@ -25,8 +25,10 @@ export interface DetectResult {
   /**
    * Set when the page asks for the username first and shows the password step only after it
    * (identifier-first login: Google, Microsoft, Okta and other SPA logins).
+   * `code`: no password field, but a one-time-code field: the second step of a login whose code page is a page
+   * of its own (a server-rendered app that navigated after the password).
    */
-  step?: 'identifier';
+  step?: 'identifier' | 'code';
   /**
    * With `step: 'identifier'`: the button says Next or Continue. A Log in / Sign in button may still
    * belong to a one-page form whose password field has not rendered yet, so callers wait longer for it.
@@ -160,7 +162,7 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
       button.click();
       return 'clicked';
     }
-    const form = ((tagged('password') ?? tagged('username') ?? tagged('code')) as HTMLInputElement | null)?.form;
+    const form = ((tagged('code') ?? tagged('password') ?? tagged('username')) as HTMLInputElement | null)?.form;
     if (form) {
       form.requestSubmit();
       return 'submitted';
@@ -168,22 +170,23 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
     return 'none';
   }
 
-  // detect and code tag what they find; tags from an earlier step would point at the wrong fields.
-  document.querySelectorAll(`[${ATTR}]`).forEach((el) => el.removeAttribute(ATTR));
-
   if (action === 'code') {
+    // Earlier code and button tags would point at the wrong elements. The password tag stays: a failed code
+    // step still clears the password field, also when the page only hid it.
+    document.querySelectorAll(`[${ATTR}="code"], [${ATTR}="submit"]`).forEach((el) => el.removeAttribute(ATTR));
     const field = Array.from(document.querySelectorAll('input')).find(codeField);
     if (field === undefined) return { found: false, hasSubmit: false };
     field.setAttribute(ATTR, 'code');
     // The form's own submit button, or a Verify / Continue button after the field in its container:
     // never "Resend code" or "Cancel", and never a button before the field.
+    // A form with no such button is submitted as a whole instead (requestSubmit, with no submitter).
     const VERIFY_TEXT =
-      /^(verify|verify code|submit|continue|confirm|next|done|(log|sign) ?-?in|login|signin|do[gğ]rula|onayla|g[oö]nder|devam( et)?|giri[sş]( yap)?|best[aä]tigen|weiter|v[ée]rifier|valider|continuer|verificar|confirmar|continuar)$/i;
+      /^((verify|confirm|submit|check)( (the )?code)?|continue|next|done|ok|(log|sign) ?-?in|login|signin|do[gğ]rula|onayla|g[oö]nder|devam( et)?|giri[sş]( yap)?|best[aä]tigen|weiter|v[ée]rifier|valider|continuer|verificar|confirmar|continuar)$/i;
     const enabled = (el: Element): boolean => visible(el) && !(el as HTMLButtonElement).disabled;
     let button: Element | null =
       (field.form &&
         Array.from(field.form.querySelectorAll('button, input[type="submit"], input[type="image"]')).find(
-          (el) => enabled(el) && (el.tagName !== 'BUTTON' || (el as HTMLButtonElement).type === 'submit'),
+          (el) => enabled(el) && (el.tagName !== 'BUTTON' || (el as HTMLButtonElement).type === 'submit') && VERIFY_TEXT.test(label(el)),
         )) ||
       null;
     for (let node = field.parentElement, depth = 0; button === null && node !== null && depth < 4; node = node.parentElement, depth += 1) {
@@ -196,7 +199,8 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
     return { found: true, hasSubmit: button !== null };
   }
 
-  // detect: find the login form and tag its fields.
+  // detect: find the login form and tag its fields; tags from an earlier step would point at the wrong fields.
+  document.querySelectorAll(`[${ATTR}]`).forEach((el) => el.removeAttribute(ATTR));
   const selectors = arg.selectors ?? {};
   const notFound = (field: string): DetectResult => ({
     found: false,
@@ -266,6 +270,9 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
         button.setAttribute(ATTR, 'submit');
         return { found: false, hasUsername: true, hasSubmit: true, step: 'identifier', nextButton: NEXT_TEXT.test(label(button)) };
       }
+      // The code page of a login whose second step is a page of its own: the caller fills the code (with a TOTP
+      // secret) or hands it to a person.
+      if (Array.from(document.querySelectorAll('input')).some(codeField)) return { found: false, hasUsername: false, hasSubmit: false, step: 'code' };
       // No form to fill. Does the page want something only a person can do? Only checked here, without a
       // password field or a username step: SSO buttons, passkeys and invisible captchas sit on many normal
       // login pages and block nothing there.

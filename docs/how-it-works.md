@@ -82,7 +82,7 @@ After submitting, autologin-mcp watches the page for up to 10 seconds:
 
 On `failed`, the password field is cleared and the password (and a one-time code, if one was sent) is removed from any text that is returned.
 
-The one-time code is made on your machine from the profile's TOTP secret (RFC 6238; SHA-1, 6 digits and 30 seconds unless an `otpauth://` URI says otherwise). In CDP mode autologin-mcp types it; in bridge mode the page asks the bridge for it once, when it shows the code step, under the same origin check as the credentials. The secret itself never leaves autologin-mcp. When less than 3 seconds of the current code are left, it waits for the next one.
+The one-time code is made on your machine from the profile's TOTP secret (RFC 6238; SHA-1, 6 digits and 30 seconds unless an `otpauth://` URI says otherwise). In CDP mode autologin-mcp types it; in bridge mode the page asks the bridge for it once, when it shows the code step, under the same origin check as the credentials, and with a key that only the login's own script carries. The secret itself never leaves autologin-mcp. A page that asks only for the code (the app navigated after the password) is a code step too: with a TOTP secret, `login` fills just the code; without one, it returns `needs_human` with `reason: mfa_required`. When less than 3 seconds of the current code are left, it waits for the next one.
 
 After three failed logins in five minutes, the profile is paused (`rate_limited`), so a wrong password cannot lock the account.
 

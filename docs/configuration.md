@@ -63,7 +63,8 @@ printf '%s\n%s' "$PASSWORD" "$TOTP_SECRET" | npx autologin-mcp add staging \
 ```
 
 - The secret is the base32 text an app offers under "Can't scan the code?", or the whole `otpauth://totp/...` URI inside the QR code. A URI may set `algorithm` (SHA1, SHA256, SHA512), `digits` (6 to 8) and `period`; the defaults are SHA-1, 6 digits and 30 seconds.
-- The code is made on this machine (RFC 6238) right before it is typed, and the page only gets the current code, once per login. The secret is redacted from every tool result.
+- The code is made on this machine (RFC 6238) right before it is typed. In bridge mode the page gets only the current code, once per login, and only the login's own script can ask for it. The secret and the code are redacted from every tool result.
+- A code step on the login page itself is filled in the same run. When the app shows the code on a page of its own after the password, CDP mode follows the tab there; in bridge mode the first script returns `submitted`, and the next `login` call on the code page fills the code without asking for the credentials again.
 - If less than 3 seconds of the current code are left, autologin-mcp waits for the next one. A rejected code returns `failed` with `reason: totp_rejected` and counts toward the rate limit.
 - Codes sent by SMS or email, push approvals and security keys are not covered: without a TOTP secret the code step is handed to a person (`needs_human`, `reason: mfa_required`).
 - With the password and the TOTP secret in one file, the account's second factor becomes part of the first. Use this for test accounts only.

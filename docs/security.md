@@ -27,7 +27,7 @@ autologin-mcp has one job: an AI agent can log in to the app it is testing, but 
 | Another program or page uses the bridge | The bridge listens on `127.0.0.1` only, on a random port. Each script carries a random 192-bit token, works once and expires after 60 seconds. A profile can be released at most 20 times in five minutes. |
 | The agent re-runs a used script | It receives the first run's outcome, not the credentials. |
 | A wrong password locks the account | After three failed logins in five minutes, the profile is paused (`rate_limited`). A rejected one-time code counts the same way. |
-| A TOTP secret leaks to the page or the agent | The code is made on your machine; a page only gets the current code, once per login, after the password and under the same origin check. The secret and the code are redacted from every result. |
+| A TOTP secret leaks to the page or the agent | The code is made on your machine. In bridge mode a page only gets the current code, once per login, under the same origin check, and only through the login's own script: the code endpoint asks for a key that is in that script and nowhere else, not even in what the agent sees. The secret and the code are redacted from every result, including the URL. |
 | The password stays in the page after a failed attempt | The password field is cleared. |
 | A silent update of a tool that handles credentials | `install` pins the exact package version. |
 

@@ -137,13 +137,30 @@ async function submitForm(page: PageLike, hasSubmit: boolean): Promise<void> {
 
 /**
  * Fills and submits the login form of `page` with `profile`, then waits for the outcome.
- * Deterministic: no AI involved. Never returns or logs the password.
+ * Deterministic: no AI involved. Never returns or logs the password, the TOTP secret or a one-time code.
  */
 export async function performLogin(
   page: PageLike,
   profile: UsableProfile,
   timing: LoginTiming = DEFAULT_TIMING,
   clock: Clock = realClock,
+): Promise<LoginResult> {
+  // The one-time code sent for this login, if any: like the password, it never appears in a result,
+  // also not in the URL (a GET form puts it there). Every result of loginSteps carries the URL.
+  const sent = { code: null as string | null };
+  const result = await loginSteps(page, profile, timing, clock, (code) => (sent.code = code));
+  if (sent.code === null) return result;
+  const code = sent.code;
+  const hide = (text: string): string => text.split(code).join(REDACTED);
+  return { ...result, url: hide(result.url!), ...(result.hint === undefined ? {} : { hint: hide(result.hint) }) };
+}
+
+async function loginSteps(
+  page: PageLike,
+  profile: UsableProfile,
+  timing: LoginTiming,
+  clock: Clock,
+  codeSent: (code: string) => void,
 ): Promise<LoginResult> {
   const base = { profile: profile.name };
   // The tab can leave the profile's site while we wait (a redirect, or the username step sending it to a
@@ -168,10 +185,28 @@ export async function performLogin(
   };
   const detect = () => attempt(() => page.run<DetectResult>('detect', { selectors: profile.selectors }));
   const state = () => attempt(() => page.run<StateResult>('state', { successSelector: profile.selectors.success }));
-  const clearPassword = () => attempt(() => page.run<boolean>('clear', { role: 'password' }));
-  // The one-time code sent for this login, if any: like the password, it never appears in a result.
-  let sentCode: string | null = null;
-  const hide = (text: string): string => (sentCode === null ? text : text.split(sentCode).join(REDACTED));
+  const clearFields = async () => {
+    await attempt(() => page.run<boolean>('clear', { role: 'password' }));
+    if (codeSentYet) await attempt(() => page.run<boolean>('clear', { role: 'code' }));
+  };
+  const mfaRequired = (): LoginResult => ({ status: 'needs_human', ...base, url: page.url(), reason: 'mfa_required', hint: NEEDS_HUMAN_HINTS.mfa_required });
+  let codeSentYet = false;
+  /**
+   * A second factor the profile has a TOTP secret for: one code per login, made here, typed like the password.
+   * The code is made first (it may wait for the next one), then the field is tagged, so the tag is fresh.
+   */
+  const sendCode = async (totp: NonNullable<UsableProfile['totp']>): Promise<LoginResult | null> => {
+    onSite();
+    const code = await freshTotpCode(totp, clock);
+    onSite();
+    const step = await attempt(() => page.run<CodeResult>('code', {}));
+    if (!step?.found) return mfaRequired();
+    codeSent(code);
+    codeSentYet = true;
+    await typeInto(page, 'code', code, onSite);
+    await submitForm(page, step.hasSubmit);
+    return null;
+  };
 
   try {
     const detectStart = clock.now();
@@ -180,9 +215,10 @@ export async function performLogin(
     let detected = await detect();
     // Wait for a password field. An identifier step (username + Next) counts only once it has stayed for
     // the settle time; with a Log in / Sign in button, only after the whole detect time, since a one-page
-    // form may still be rendering its password field.
+    // form may still be rendering its password field. A code page (the app navigated after the password)
+    // needs no waiting.
     for (;;) {
-      if (detected?.found || detected?.error) break;
+      if (detected?.found || detected?.error || detected?.step === 'code') break;
       const now = clock.now();
       if (detected?.step === 'identifier') {
         identifierSince ??= now;
@@ -194,7 +230,9 @@ export async function performLogin(
       await clock.sleep(timing.pollMs);
       detected = await detect();
     }
-    if (!detected?.found) {
+    const codePage = detected?.step === 'code';
+    if (codePage && profile.totp === undefined) return mfaRequired();
+    if (!detected?.found && !codePage) {
       if (detected?.step !== 'identifier' || !detected.hasUsername) {
         if (detected?.blocker) return { status: 'needs_human', ...base, url: page.url(), reason: detected.blocker, hint: NEEDS_HUMAN_HINTS[detected.blocker] };
         return { status: 'no_login_form', ...base, url: page.url(), hint: detected?.error ?? 'No visible password field was found on the page.' };
@@ -229,9 +267,15 @@ export async function performLogin(
     onSite();
     const before = await state();
     await page.bringToFront().catch(() => undefined);
-    if (detected.hasUsername) await typeInto(page, 'username', profile.username, onSite);
-    await typeInto(page, 'password', profile.password, onSite);
-    await submitForm(page, detected.hasSubmit);
+    if (codePage) {
+      // Only the code is asked for here: the password went in on the page before.
+      const stopped = await sendCode(profile.totp!);
+      if (stopped !== null) return stopped;
+    } else {
+      if (detected!.hasUsername) await typeInto(page, 'username', profile.username, onSite);
+      await typeInto(page, 'password', profile.password, onSite);
+      await submitForm(page, detected!.hasSubmit);
+    }
 
     // Each step (the password, then a one-time code) gets its own wait and its own "message before".
     let stepStart = clock.now();
@@ -247,17 +291,10 @@ export async function performLogin(
         if (current.success) return { status: 'success', ...base, url: page.url() };
         if (current.codeVisible && !current.passwordVisible) {
           goneStreak = 0;
-          if (profile.totp === undefined) {
-            return { status: 'needs_human', ...base, url: page.url(), reason: 'mfa_required', hint: NEEDS_HUMAN_HINTS.mfa_required };
-          }
-          if (sentCode === null) {
-            // A second factor the profile has a TOTP secret for: one code, made here, typed like the password.
-            onSite();
-            const step = await attempt(() => page.run<CodeResult>('code', {}));
-            if (!step?.found) return { status: 'needs_human', ...base, url: page.url(), reason: 'mfa_required', hint: NEEDS_HUMAN_HINTS.mfa_required };
-            sentCode = await freshTotpCode(profile.totp, clock);
-            await typeInto(page, 'code', sentCode, onSite);
-            await submitForm(page, step.hasSubmit);
+          if (profile.totp === undefined) return mfaRequired();
+          if (!codeSentYet) {
+            const stopped = await sendCode(profile.totp);
+            if (stopped !== null) return stopped;
             stepStart = clock.now();
             stepBefore = current;
             lookedAgain = false;
@@ -281,20 +318,20 @@ export async function performLogin(
         lookedAgain = true;
       }
     }
-    await clearPassword();
-    if (sentCode !== null && last?.codeVisible) {
-      return { status: 'failed', ...base, url: page.url(), reason: 'totp_rejected', hint: hide(last.errorText ?? TOTP_REJECTED_HINT) };
+    await clearFields();
+    if (codeSentYet && last?.codeVisible) {
+      return { status: 'failed', ...base, url: page.url(), reason: 'totp_rejected', hint: last.errorText ?? TOTP_REJECTED_HINT };
     }
     return {
       status: 'failed',
       ...base,
       url: page.url(),
       reason: 'still_on_login_form',
-      hint: hide(last?.errorText ?? 'Still on the login form after submitting. Check the credentials, or set selectors for this profile.'),
+      hint: last?.errorText ?? 'Still on the login form after submitting. Check the credentials, or set selectors for this profile.',
     };
   } catch (error) {
     if (error instanceof LeftSiteError) return error.result;
-    await clearPassword();
-    return { status: 'error', ...base, url: page.url(), hint: hide(error instanceof Error ? error.message : String(error)) };
+    await clearFields();
+    return { status: 'error', ...base, url: page.url(), hint: error instanceof Error ? error.message : String(error) };
   }
 }

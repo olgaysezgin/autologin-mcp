@@ -39,6 +39,10 @@ export function base32Decode(text: string): Buffer | null {
 
 export type ParsedTotp = { ok: true; config: TotpConfig } | { ok: false; error: string };
 
+/** 80 bits (16 base32 characters): the shortest secret authenticator setups hand out. */
+const MIN_KEY_BYTES = 10;
+const TOO_SHORT = 'the secret is too short: an authenticator secret has at least 16 base32 characters';
+
 /**
  * A base32 secret (SHA-1, 6 digits, 30 s), or an `otpauth://totp/...` URI as the QR code of an
  * authenticator setup holds it, which may set `algorithm`, `digits` and `period`.
@@ -47,7 +51,9 @@ export function parseTotpSecret(value: string): ParsedTotp {
   const text = value.trim();
   if (!/^otpauth:/i.test(text)) {
     const key = base32Decode(text);
-    return key === null ? { ok: false, error: 'not a base32 secret or an otpauth:// URI' } : { ok: true, config: { key, algorithm: 'SHA1', digits: 6, period: 30 } };
+    if (key === null) return { ok: false, error: 'not a base32 secret or an otpauth:// URI' };
+    if (key.length < MIN_KEY_BYTES) return { ok: false, error: TOO_SHORT };
+    return { ok: true, config: { key, algorithm: 'SHA1', digits: 6, period: 30 } };
   }
   let url: URL;
   try {
@@ -58,6 +64,7 @@ export function parseTotpSecret(value: string): ParsedTotp {
   if (url.hostname.toLowerCase() !== 'totp') return { ok: false, error: 'only otpauth://totp/ URIs are supported (time-based codes)' };
   const key = base32Decode(url.searchParams.get('secret') ?? '');
   if (key === null) return { ok: false, error: 'the otpauth:// URI has no valid base32 secret' };
+  if (key.length < MIN_KEY_BYTES) return { ok: false, error: TOO_SHORT };
   const algorithm = (url.searchParams.get('algorithm') ?? 'SHA1').toUpperCase() as TotpAlgorithm;
   if (!ALGORITHMS.includes(algorithm)) return { ok: false, error: `algorithm must be one of ${ALGORITHMS.join(', ')}` };
   const digits = Number(url.searchParams.get('digits') ?? 6);
@@ -67,17 +74,31 @@ export function parseTotpSecret(value: string): ParsedTotp {
   return { ok: true, config: { key, algorithm, digits, period } };
 }
 
-/** The forms a TOTP secret can show up in (as written, without spaces, inside an otpauth:// URI), for redaction. */
+/**
+ * The forms a TOTP secret can show up in, for redaction: as written, without spaces, inside an otpauth:// URI,
+ * and a base32 secret in either case (base32 is case-insensitive, so either one works as the secret).
+ */
 export function secretForms(value: string): string[] {
   const text = value.trim();
-  const forms = new Set([text, text.replace(/[\s-]/g, '')]);
+  const forms = new Set([text]);
+  const addBase32 = (secret: string): void => {
+    const compact = secret.replace(/[\s-]/g, '');
+    forms.add(compact);
+    if (base32Decode(compact) !== null) {
+      forms.add(compact.toUpperCase());
+      forms.add(compact.toLowerCase());
+    }
+  };
   if (/^otpauth:/i.test(text)) {
+    forms.add(text.replace(/[\s-]/g, ''));
     try {
       const secret = new URL(text).searchParams.get('secret');
-      if (secret) forms.add(secret);
+      if (secret) addBase32(secret);
     } catch {
       // parseTotpSecret reports the URI as a problem of the profile.
     }
+  } else {
+    addBase32(text);
   }
   return [...forms].filter((form) => form !== '');
 }

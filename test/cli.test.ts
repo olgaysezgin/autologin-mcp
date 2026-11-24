@@ -454,6 +454,17 @@ describe('add --totp (#1)', () => {
     expect(() => parseArgs(['add', 'app', `--totp=${TOTP}`])).toThrow(NO_TOTP_VALUE);
   });
 
+  it('refuses a secret after --totp, where it would become the profile name (#1 review)', async () => {
+    expect(() => parseArgs(['add', '--totp', TOTP])).toThrow(NO_TOTP_VALUE);
+    expect(() => parseArgs(['add', 'staging', '--totp', TOTP])).toThrow(NO_TOTP_VALUE);
+    expect(NO_TOTP_VALUE).toContain('Put the profile name before --totp');
+    expect(parseArgs(['add', 'staging', '--totp', '-y']).flags).toMatchObject({ totp: true, yes: true });
+    expect(await main(['add', 'staging', TOTP, '--totp'], ctx({}, ['pw', 'pw', TOTP]))).toBe(1);
+    expect(err).toContain('add takes one profile name');
+    expect(err).not.toContain(TOTP);
+    await expect(fs.stat(file)).rejects.toThrow();
+  });
+
   it('marks TOTP profiles in the list, without the secret', async () => {
     await main(['add', 'app', '--url', 'x.test', '--username', 'u', '--password-stdin', '--totp'], ctx({ stdin: piped(`pw\n${TOTP}`), prompter: noPrompts }));
     out = '';

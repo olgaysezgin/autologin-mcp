@@ -119,6 +119,16 @@ describe('login engine in a real Chrome (auto-connect via DevToolsActivePort)', 
     expect(wrong.result).toMatchObject({ status: 'failed', reason: 'totp_rejected', hint: 'That code is not valid' });
   });
 
+  it('follows a server-rendered app to its code page and fills the code there (#1 review)', async () => {
+    const { tab, result } = await loginOn('totp-classic.html', profile({ APP_TOTP_SECRET: TOTP_SECRET }));
+    expect(result).toMatchObject({ status: 'success', profile: 'app' });
+    expect(tab.url()).toMatch(/\/dashboard\.html$/);
+    expect(app.codes.at(-1)).toMatch(/^\d{6}$/);
+    // Without a TOTP secret, the code page goes to a person.
+    const { result: noSecret } = await loginOn('totp-code.html', profile(), { ...FAST, detectTimeoutMs: 800 });
+    expect(noSecret).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
+  });
+
   it('types nothing on another site when the username step leads there', async () => {
     const other = await startFixtureServer(); // another port: another site, like a single sign-on host
     try {
@@ -285,6 +295,22 @@ describe('bridge mode in a real Chrome (autologin-mcp has no CDP access)', () =>
     const wrong = await bridgeOn('totp.html', profile({ APP_TOTP_SECRET: 'JBSWY3DPEHPK3PXP' }));
     expect(wrong.result).toMatchObject({ status: 'failed', reason: 'totp_rejected', hint: 'That code is not valid' });
     await vi.waitFor(() => expect(reports.at(-1)![1]).toMatchObject({ status: 'failed', reason: 'totp_rejected' }));
+  });
+
+  it('fills the code page of a server-rendered app on the next login call, without the credentials (#1 review)', async () => {
+    const p = profile({ APP_TOTP_SECRET: TOTP_SECRET });
+    const { tab, result } = await bridgeOn('totp-classic.html', p);
+    expect(result.status).toBe('submitted');
+    await tab.waitForFunction(() => location.pathname === '/totp-code.html');
+    const asked: string[] = [];
+    tab.on('request', (request) => {
+      if (request.url().includes('/v1/')) asked.push(new URL(request.url()).pathname.split('/')[2]!);
+    });
+    const fn = (await bridge.issue(p)).function;
+    expect(await tab.evaluate(`(${fn})()`)).toMatchObject({ status: 'submitted' });
+    await tab.waitForFunction(() => location.pathname === '/dashboard.html');
+    expect(asked).toEqual(['filler', 'code', 'result']);
+    expect(app.codes.at(-1)).toMatch(/^\d{6}$/);
   });
 
   it('runs a script once: after a run that found no form, a re-run types nothing (#2 review)', async () => {
