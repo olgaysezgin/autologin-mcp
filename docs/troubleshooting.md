@@ -58,10 +58,14 @@ The page wants something only a person can do, and autologin-mcp stopped without
 - `sso`: the tab is on a single sign-on provider (Google, Microsoft, Okta, ...), or the login page offers only "Sign in with ..." buttons. Sign in yourself; autologin-mcp fills only the app's own username and password form. A page that also offers "Continue with email" or a password is not reported: open that form and let the agent call `login` again.
 - `passkey`: the page asks for a passkey or a security key, which needs your device.
 - `captcha`: a captcha stands before the login. Solve it, then let the agent call `login` again if the form appears.
-- `mfa_required`: the password was accepted and the page asks for a one-time code. Filling TOTP codes is planned ([#1](https://github.com/olgaysezgin/autologin-mcp/issues/1)).
+- `mfa_required`: the password was accepted and the page asks for a one-time code. If the code comes from an authenticator app, give the profile its TOTP secret (`npx autologin-mcp add <name> --totp`, see [Configuration](configuration.md#authenticator-codes-totp)) and autologin-mcp fills it. Codes sent by SMS or email stay with you.
 - `password_step_timeout`, `left_profile_site`: see the identifier-first section above.
 
-Pages are classified only after the usual detect time (5 seconds), so a login form that renders late is still filled. In bridge mode the credentials are not even requested for these pages.
+Single sign-on, passkey and captcha pages are classified only after the usual detect time (5 seconds), so a login form that renders late is still filled; a code page right after the password step needs no wait. In bridge mode the credentials are not even requested for these pages.
+
+## `failed` with `reason: totp_rejected`
+
+The page did not accept the one-time code made from the profile's TOTP secret. Check that the secret belongs to this account (re-add it from the authenticator setup, or its `otpauth://` URI), and that the computer's clock is set automatically: a clock that is off by more than about 30 seconds makes every code wrong. Like a wrong password, it counts toward the rate limit. One code is sent per password step. In bridge mode, when the code page navigates, the script returns `submitted` with `reason: code_submitted`; if the page right after the code is the code page again with an error message, or the app's login form, the next `login` call returns `totp_rejected` (counted) and sends no new code. A login form on any later page (logging out and in again) is a normal login. So a wrong secret sends at most one code per password step, and the rate limit stops it after three.
 
 ## `failed` although the credentials are right
 

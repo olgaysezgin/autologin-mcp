@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { agentExpression, agentFunction, agentScript, bridgeLogin, fillerScript, type BridgeCredentials, type BridgeTiming } from '../src/bridge/filler.ts';
+import { CODE_STEP_KEY, PASSWORD_STEP_KEY } from '../src/bridge/filler.ts';
 import { autologinInpage } from '../src/inpage.ts';
 
 const TIMING: BridgeTiming = { detectTimeoutMs: 100, verifyTimeoutMs: 200, pollMs: 10, earlyFailAfterMs: 30 };
@@ -417,5 +418,299 @@ describe('bridgeLogin: fields re-rendered while the credentials arrive (#2 revie
     };
     expect(await bridgeLogin(autologinInpage, creds, TIMING)).toEqual({ status: 'success', url: location.href });
     expect(received).toEqual({ username: CREDS.username, password: CREDS.password });
+  });
+});
+
+describe('TOTP codes after the password (#1)', () => {
+  /** The password form gives way to a code step; `onVerify` gets what was typed into the code field. */
+  function codeApp(onVerify: (code: string) => void) {
+    app(() => {
+      document.querySelector('#login')!.innerHTML = `<input id="otp" autocomplete="one-time-code"><button id="verify">Verify</button><p id="err" class="error"></p>`;
+      document.querySelector('#verify')!.addEventListener('click', () => onVerify(document.querySelector<HTMLInputElement>('#otp')!.value));
+    });
+  }
+
+  it('asks for the code only at the code step, fills it, submits it and succeeds', async () => {
+    const code = vi.fn(async () => '123456');
+    let typed = '';
+    codeApp((value) => {
+      typed = value;
+      document.querySelector('#login')!.remove();
+    });
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code }, TIMING)).toEqual({ status: 'success', url: location.href });
+    expect(typed).toBe('123456');
+    expect(code).toHaveBeenCalledOnce();
+  });
+
+  it('reports a rejected code as failed, with the code scrubbed from the page message', async () => {
+    codeApp(() => setTimeout(() => showError('Code 123456 is not valid'), 5));
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code: async () => '123456' }, TIMING)).toEqual({
+      status: 'failed',
+      url: location.href,
+      reason: 'totp_rejected',
+      hint: 'Code [REDACTED] is not valid',
+    });
+  });
+
+  it('fails with a hint about the secret and the clock when the code step stays', async () => {
+    codeApp(() => undefined);
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code: async () => '123456' }, TIMING)).toMatchObject({
+      status: 'failed',
+      reason: 'totp_rejected',
+      hint: expect.stringContaining('clock'),
+    });
+  });
+
+  it('presses Enter in a code field without a button', async () => {
+    app(() => {
+      const login = document.querySelector('#login')!;
+      login.innerHTML = '<input id="otp" name="otp">';
+      document.querySelector('#otp')!.addEventListener('keydown', (e) => {
+        if ((e as KeyboardEvent).key === 'Enter') login.remove();
+      });
+    });
+    expect((await bridgeLogin(autologinInpage, { ...CREDS, code: async () => '123456' }, TIMING)).status).toBe('success');
+  });
+
+  it('types nothing when the code is refused or the code step went away meanwhile', async () => {
+    codeApp(() => undefined);
+    const refused = async (): Promise<string> => {
+      throw new Error('This login already got its one-time code.');
+    };
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code: refused }, TIMING)).toEqual({ status: 'error', url: location.href, hint: 'This login already got its one-time code.' });
+    expect(document.querySelector<HTMLInputElement>('#otp')!.value).toBe('');
+
+    codeApp(() => undefined);
+    const gone = async () => {
+      document.querySelector('#login')!.innerHTML = '<p>Choose another way to sign in</p><input name="otp" style="display:none">';
+      return '123456';
+    };
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code: gone }, TIMING)).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
+  });
+});
+
+/**
+ * What the password step's run leaves when the page navigates: the next document, loaded right after it, may be its
+ * code page. jsdom has no navigation timing, so the page's load address is given here (the current address).
+ */
+const markPasswordStep = (at = performance.timeOrigin + 200) => {
+  sessionStorage.setItem(PASSWORD_STEP_KEY, String(at));
+  const loaded = location.href;
+  Object.defineProperty(performance, 'getEntriesByType', { configurable: true, value: (type: string) => (type === 'navigation' ? [{ name: loaded }] : []) });
+};
+/** Same, for the page right after a submitted code. */
+const markCodeStep = (at = performance.timeOrigin + 200) => {
+  sessionStorage.setItem(CODE_STEP_KEY, String(at));
+  const loaded = location.href;
+  Object.defineProperty(performance, 'getEntriesByType', { configurable: true, value: (type: string) => (type === 'navigation' ? [{ name: loaded }] : []) });
+};
+afterEach(() => {
+  delete (performance as { getEntriesByType?: unknown }).getEntriesByType;
+  sessionStorage.clear();
+});
+
+describe('TOTP codes: review fixes (#1 review)', () => {
+  it('fills only the code on a code page of its own, never asking for the credentials', async () => {
+    markPasswordStep();
+    document.body.innerHTML = `<form id="f"><label>Code <input name="user[otp_attempt]" autocomplete="one-time-code"></label><input type="submit" value="Verify"></form>`;
+    let typed = '';
+    document.querySelector('#f')!.addEventListener('submit', (e) => {
+      e.preventDefault();
+      typed = document.querySelector<HTMLInputElement>('input[autocomplete]')!.value;
+      document.querySelector('#f')!.remove();
+    });
+    const load = vi.fn(async () => ({ username: 'u', password: 'p' }));
+    const code = vi.fn(async () => '654321');
+    expect(await bridgeLogin(autologinInpage, { selectors: {}, load, code, codeStep: 'after_password' }, TIMING)).toEqual({ status: 'success', url: location.href });
+    expect(typed).toBe('654321');
+    expect(load).not.toHaveBeenCalled();
+    expect(code).toHaveBeenCalledWith(true);
+  });
+
+  it('hands a code page to a person when its code field goes away while the code is on its way', async () => {
+    markPasswordStep();
+    document.body.innerHTML = `<input name="otp"><button>Verify</button>`;
+    const gone = async () => {
+      document.body.innerHTML = '<p>Choose another way to sign in</p>';
+      return '123456';
+    };
+    expect(await bridgeLogin(autologinInpage, { selectors: {}, load: vi.fn(), code: gone, codeStep: 'after_password' }, TIMING)).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
+  });
+
+  it('hands a code page to a person at once without a TOTP secret', async () => {
+    markPasswordStep();
+    document.body.innerHTML = `<input name="otp"><button>Verify</button>`;
+    const startedAt = Date.now();
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, codeStep: 'after_password' }, { ...TIMING, detectTimeoutMs: 2_000 })).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+  });
+
+  it('keeps the code out of the result URL, as a GET form would carry it', async () => {
+    const original = location.href;
+    app(() => {
+      document.querySelector('#login')!.innerHTML = `<input id="otp" name="otp"><button id="verify">Verify</button>`;
+      document.querySelector('#verify')!.addEventListener('click', () => {
+        history.replaceState(null, '', `/verify?otp=${document.querySelector<HTMLInputElement>('#otp')!.value}`);
+        document.querySelector('#login')!.remove();
+      });
+    });
+    const result = await bridgeLogin(autologinInpage, { ...CREDS, code: async () => '123456' }, TIMING);
+    history.replaceState(null, '', original);
+    expect(result).toEqual({ status: 'success', url: expect.stringMatching(/\/verify\?otp=\[REDACTED\]$/) });
+  });
+
+  it('clears the code and a hidden password after a rejected code', async () => {
+    app(() => {
+      document.querySelector<HTMLElement>('#pass')!.style.display = 'none';
+      document.querySelector<HTMLElement>('#go')!.style.display = 'none';
+      document.querySelector('#login')!.insertAdjacentHTML('beforeend', `<input id="otp" name="otp"><button id="verify">Verify</button>`);
+      document.querySelector('#verify')!.addEventListener('click', () => showError('Wrong code'));
+    });
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code: async () => '123456' }, TIMING)).toMatchObject({ status: 'failed', reason: 'totp_rejected', hint: 'Wrong code' });
+    expect(document.querySelector<HTMLInputElement>('#pass')!.value).toBe('');
+    expect(document.querySelector<HTMLInputElement>('#otp')!.value).toBe('');
+  });
+});
+
+describe('TOTP codes: only within a login (#1 review 2)', () => {
+  const codePage = () => (document.body.innerHTML = `<form id="f"><input name="otp" autocomplete="one-time-code"><button type="submit">Verify</button></form>`);
+
+  it('leaves a code page alone when no login is in progress, as before TOTP support', async () => {
+    codePage();
+    const code = vi.fn(async () => '123456');
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code }, TIMING)).toMatchObject({ status: 'no_login_form' });
+    expect(code).not.toHaveBeenCalled();
+  });
+
+  it('reports a code page after a submitted code as a rejected code, asking for no new one', async () => {
+    markCodeStep();
+    codePage();
+    document.body.insertAdjacentHTML('beforeend', '<p role="alert">That code is not valid</p>');
+    const code = vi.fn(async () => '123456');
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code, codeStep: 'after_code' }, TIMING)).toEqual({
+      status: 'failed',
+      url: location.href,
+      reason: 'totp_rejected',
+      hint: expect.stringContaining('No new code was sent'),
+    });
+    expect(code).not.toHaveBeenCalled();
+  });
+
+  it('marks a page that navigates after the code was submitted, so the next call can tell a rejected code', async () => {
+    app(() => {
+      document.querySelector('#login')!.innerHTML = `<input id="otp" name="otp"><button id="verify">Verify</button>`;
+      document.querySelector('#verify')!.addEventListener('click', () => window.dispatchEvent(new Event('beforeunload')));
+    });
+    const code = vi.fn(async () => '123456');
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code }, TIMING)).toMatchObject({ status: 'submitted', reason: 'code_submitted', hint: expect.stringContaining('call login again') });
+    expect(code).toHaveBeenCalledWith(false);
+    expect(Number(sessionStorage.getItem(CODE_STEP_KEY))).toBeGreaterThan(0);
+    expect(sessionStorage.getItem(PASSWORD_STEP_KEY)).toBeNull();
+  });
+});
+
+describe('TOTP codes: the code page must follow the password step (#1 review 3)', () => {
+  afterEach(() => sessionStorage.clear());
+  const codePage = () => (document.body.innerHTML = `<form id="f"><input name="otp" autocomplete="one-time-code"><button type="submit">Verify</button></form>`);
+
+  it('leaves a code page alone unless the document was loaded right after the password step, and uses the mark up', async () => {
+    const code = vi.fn(async () => '123456');
+    codePage();
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code, codeStep: 'after_password' }, TIMING)).toMatchObject({ status: 'no_login_form', hint: expect.stringContaining('leaves it alone') });
+    markPasswordStep(performance.timeOrigin - 60_000); // the agent went on to another page since
+    codePage();
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code, codeStep: 'after_password' }, TIMING)).toMatchObject({ status: 'no_login_form' });
+    expect(code).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(PASSWORD_STEP_KEY)).toBeNull();
+  });
+
+  it('marks the tab when the page navigates after the password, not after a username step or a code', async () => {
+    app(() => window.dispatchEvent(new Event('beforeunload')));
+    const before = Date.now();
+    expect((await bridgeLogin(autologinInpage, CREDS, TIMING)).status).toBe('submitted');
+    expect(Number(sessionStorage.getItem(PASSWORD_STEP_KEY))).toBeGreaterThanOrEqual(before);
+    sessionStorage.clear();
+    document.body.innerHTML = `<form><input id="mail" type="email"><button id="next" type="button">Next</button></form>`;
+    document.querySelector('#next')!.addEventListener('click', () => window.dispatchEvent(new Event('beforeunload')));
+    expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toMatchObject({ reason: 'username_step_navigated' });
+    expect(sessionStorage.getItem(PASSWORD_STEP_KEY)).toBeNull();
+  });
+
+  it('leaves a code page after a submitted code alone when it shows no error: it may be a next step, not a rejection', async () => {
+    codePage();
+    const code = vi.fn(async () => '123456');
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code, codeStep: 'after_code' }, TIMING)).toMatchObject({ status: 'no_login_form' });
+    expect(code).not.toHaveBeenCalled();
+  });
+});
+
+describe('TOTP codes: no leftover marks (#1 review 4)', () => {
+  const codePage = () => (document.body.innerHTML = `<form id="f"><input name="otp" autocomplete="one-time-code"><button type="submit">Confirm</button></form>`);
+
+  it('gives no code after the app routed on without a page load', async () => {
+    const original = location.href;
+    markPasswordStep();
+    history.pushState(null, '', '/settings/delete-repository');
+    codePage();
+    const code = vi.fn(async () => '123456');
+    const result = await bridgeLogin(autologinInpage, { ...CREDS, code, codeStep: 'after_password' }, TIMING);
+    history.replaceState(null, '', original);
+    expect(result).toMatchObject({ status: 'no_login_form' });
+    expect(code).not.toHaveBeenCalled();
+  });
+
+  it('drops the mark on every run, so it cannot linger on a page without a code step', async () => {
+    markPasswordStep();
+    document.body.innerHTML = '<p>Dashboard</p>';
+    expect((await bridgeLogin(autologinInpage, CREDS, TIMING)).status).toBe('no_login_form');
+    expect(sessionStorage.getItem(PASSWORD_STEP_KEY)).toBeNull();
+  });
+
+  it('takes a login form right after a submitted code for a rejected code, typing nothing', async () => {
+    markCodeStep();
+    let typed = false;
+    app(() => (typed = true));
+    const load = vi.fn(async () => ({ username: 'u', password: 'p' }));
+    expect(await bridgeLogin(autologinInpage, { selectors: {}, load, code: vi.fn(), codeStep: 'after_code' }, TIMING)).toMatchObject({
+      status: 'failed',
+      reason: 'totp_rejected',
+      hint: expect.stringContaining('went back to its login form'),
+    });
+    expect(load).not.toHaveBeenCalled();
+    expect(typed).toBe(false);
+  });
+});
+
+describe('TOTP codes: a later login is a login (#1 review 4)', () => {
+  it('logs in normally on a login form that is not the page right after a submitted code (log out, log in again)', async () => {
+    let received: unknown = null;
+    app((state) => {
+      received = { ...state };
+      document.querySelector('#login')!.remove();
+    });
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code: vi.fn(), codeStep: 'after_code' }, TIMING)).toEqual({ status: 'success', url: location.href });
+    expect(received).toEqual({ username: CREDS.username, password: CREDS.password });
+  });
+
+  it('leaves a code page with an error alone when it is not the page right after the code', async () => {
+    document.body.innerHTML = `<form><input name="otp"><button type="submit">Verify</button></form><p role="alert">Something went wrong</p>`;
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code: vi.fn(), codeStep: 'after_code' }, TIMING)).toMatchObject({ status: 'no_login_form' });
+  });
+});
+
+describe('TOTP codes: blocked storage (#1 review 4)', () => {
+  it('fills no code page and still logs in when the page blocks sessionStorage', async () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    document.body.innerHTML = `<form><input name="otp"><button type="submit">Verify</button></form>`;
+    const code = vi.fn(async () => '123456');
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code, codeStep: 'after_password' }, TIMING)).toMatchObject({ status: 'no_login_form' });
+    expect(code).not.toHaveBeenCalled();
+    app(() => window.dispatchEvent(new Event('beforeunload')));
+    expect((await bridgeLogin(autologinInpage, CREDS, TIMING)).status).toBe('submitted');
   });
 });

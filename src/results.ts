@@ -34,6 +34,20 @@ const WENT_THROUGH = new Set(['success', 'submitted']);
  */
 export const USERNAME_STEP_NAVIGATED = 'username_step_navigated';
 
+/** Bridge mode: the page navigated right after a one-time code was submitted (#1). */
+export const CODE_SUBMITTED = 'code_submitted';
+
+/** How long after a password step that navigated a page that asks only for a one-time code counts as its next step. */
+export const CODE_STEP_MS = 60_000;
+
+/**
+ * What a page that asks only for a one-time code means for a profile (#1):
+ * `after_password`: the password was just submitted and the page navigated, so this is the code step of that login.
+ * `after_code`: a code was just submitted and the page navigated, and the page asks again: that code was rejected.
+ * `null`: no login in progress. A code field on such a page (say "turn off two-factor authentication") is not a login.
+ */
+export type CodeStep = 'after_password' | 'after_code' | null;
+
 const wentThrough = (login: PreviousLogin): boolean => WENT_THROUGH.has(login.status) && login.reason !== USERNAME_STEP_NAVIGATED;
 
 export function alreadyLoggedInHint(previous: PreviousLogin): string {
@@ -75,6 +89,14 @@ export class ResultLog {
             ...(latest.reason === undefined ? {} : { reason: latest.reason }),
           };
     return previous === undefined || this.now() - Date.parse(previous.at) > RECENT_MS ? null : previous;
+  }
+
+  codeStep(profile: string): CodeStep {
+    // Through an earlier no_login_form (say, a code page that rendered slowly) to the real login outcome.
+    const previous = this.recent(profile);
+    if (previous?.status !== 'submitted' || this.now() - Date.parse(previous.at) > CODE_STEP_MS) return null;
+    if (previous.reason === CODE_SUBMITTED) return 'after_code';
+    return previous.reason === undefined ? 'after_password' : null;
   }
 
   record(profile: string, result: { status: string; reason?: string; hint?: string; url?: string }, via: LoggedResult['via']): LoggedResult {

@@ -1,3 +1,4 @@
+import { parseTotpSecret, type TotpConfig } from '../totp.js';
 import { parseRootUrl, type RootUrl } from './match.js';
 
 export const PROFILE_SUFFIXES = [
@@ -9,6 +10,7 @@ export const PROFILE_SUFFIXES = [
   'PASSWORD_SELECTOR',
   'SUBMIT_SELECTOR',
   'SUCCESS_SELECTOR',
+  'TOTP_SECRET',
 ] as const;
 export type ProfileSuffix = (typeof PROFILE_SUFFIXES)[number];
 
@@ -35,6 +37,10 @@ export interface Profile {
   password?: string;
   autoLogin: boolean | null;
   selectors: Selectors;
+  /** The second factor: codes are made from it on this machine; neither it nor a code is ever logged (#1). */
+  totp?: TotpConfig;
+  /** The value as written in the file, so it can be redacted from everything sent to the agent. */
+  totpSecret?: string;
   problems: string[];
 }
 
@@ -99,6 +105,12 @@ function toProfile(key: string, fields: Partial<Record<ProfileSuffix, string>>):
     autoLogin = parseBoolean(fields.AUTO_LOGIN);
     if (autoLogin === null) problems.push(`${key}_AUTO_LOGIN must be true or false`);
   }
+  let second: { totp: TotpConfig; totpSecret: string } | null = null;
+  if (fields.TOTP_SECRET?.trim()) {
+    const parsed = parseTotpSecret(fields.TOTP_SECRET);
+    if (parsed.ok) second = { totp: parsed.config, totpSecret: fields.TOTP_SECRET };
+    else problems.push(`${key}_TOTP_SECRET: ${parsed.error}`);
+  }
   return {
     name: key.toLowerCase(),
     key,
@@ -113,6 +125,7 @@ function toProfile(key: string, fields: Partial<Record<ProfileSuffix, string>>):
       submit: clean(fields.SUBMIT_SELECTOR),
       success: clean(fields.SUCCESS_SELECTOR),
     },
+    ...second,
     problems,
   };
 }

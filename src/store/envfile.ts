@@ -39,13 +39,14 @@ export function quoteValue(value: string): string {
 
 export const profileMarker = (name: string): string => `# --- ${name.toLowerCase()} ---`;
 
-export function renderProfile(profile: { name: string; url: string; username: string; password: string }): string {
+export function renderProfile(profile: { name: string; url: string; username: string; password: string; totpSecret?: string }): string {
   const key = profile.name.toUpperCase();
   return [
     profileMarker(profile.name),
     `${key}_URL=${profile.url}`,
     `${key}_USERNAME=${quoteValue(profile.username)}`,
     `${key}_PASSWORD=${quoteValue(profile.password)}`,
+    ...(profile.totpSecret === undefined ? [] : [`${key}_TOTP_SECRET=${quoteValue(profile.totpSecret)}`]),
     '',
   ].join('\n');
 }

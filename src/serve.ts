@@ -8,7 +8,7 @@ import { performLogin } from './login/engine.js';
 import { openDetached, type SpawnFn } from './opener.js';
 import { credentialsPath, resolveConfigDir, type Env } from './paths.js';
 import { FailureLimiter } from './ratelimit.js';
-import { ResultLog } from './results.js';
+import { CODE_SUBMITTED, ResultLog } from './results.js';
 import { createServer, type ServerDeps } from './server.js';
 import { ensureEnvFile, loadStore } from './store/envfile.js';
 import { VERSION } from './version.js';
@@ -22,7 +22,7 @@ export interface ServeOptions {
   input?: EventEmitter;
   connect?: BrowserManagerOptions['connect'];
   spawn?: SpawnFn;
-  bridge?: Omit<BridgeOptions, 'onResult' | 'noFormContext'>;
+  bridge?: Omit<BridgeOptions, 'onResult' | 'noFormContext' | 'codeStepContext' | 'onCodeOnly'>;
 }
 
 export function createDefaultDeps(options: ServeOptions = {}): { deps: ServerDeps; browser: BrowserManager; bridge: BridgeServer } {
@@ -44,6 +44,8 @@ export function createDefaultDeps(options: ServeOptions = {}): { deps: ServerDep
       results.record(profile, result, 'bridge');
     },
     noFormContext: (profile) => results.noFormContext(profile),
+    codeStepContext: (profile) => results.codeStep(profile),
+    onCodeOnly: (profile) => void results.record(profile, { status: 'submitted', reason: CODE_SUBMITTED }, 'bridge'),
   });
   const deps: ServerDeps = {
     version: VERSION,

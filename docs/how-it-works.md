@@ -75,11 +75,16 @@ After submitting, autologin-mcp watches the page for up to 10 seconds:
 | The element in `<PROFILE>_SUCCESS_SELECTOR` appears | `success` |
 | The password field disappears (two checks in a row; when it goes away right at the 10-second mark, one more check decides) | `success` |
 | A new error message appears (the message the field points to with `aria-describedby`/`aria-errormessage`, `role="alert"`, or an error-styled element) | `failed`, with that message as `hint` |
-| The password field gives way to a one-time-code field (`autocomplete="one-time-code"`, or a name such as `otp` or `totp_code`) | `needs_human`, `reason: mfa_required`: a person enters the code |
+| The password field gives way to a one-time-code field (`autocomplete="one-time-code"`, or a name such as `otp` or `totp_code`), and the profile has a TOTP secret | autologin-mcp fills the current code and submits it, then watches again: `success`, `failed` with `reason: totp_rejected`, or in bridge mode `submitted` with `reason: code_submitted` when the page navigates |
+| The same, without a TOTP secret | `needs_human`, `reason: mfa_required`: a person enters the code |
 | The page starts navigating (bridge mode) | `submitted`: the agent should look at the page |
 | Still on the form after 10 seconds | `failed` |
 
-On `failed`, the password field is cleared and the password is removed from any text that is returned. After three failed logins in five minutes, the profile is paused (`rate_limited`), so a wrong password cannot lock the account.
+On `failed`, the password field is cleared and the password (and a one-time code, if one was sent) is removed from any text that is returned.
+
+The one-time code is made on your machine from the profile's TOTP secret (RFC 6238; SHA-1, 6 digits and 30 seconds unless an `otpauth://` URI says otherwise). In CDP mode autologin-mcp types it; in bridge mode the page asks the bridge for it once, when it shows the code step, under the same origin check as the credentials, and with a key that only the login's own script carries. The secret itself never leaves autologin-mcp. CDP mode follows the tab from the password to the code step in the same run. In bridge mode the script ends when the page navigates, so a page that asks only for the code is a code step of its own: if it is the document the tab loaded right after the password step (within a minute, still at its load address), `login` fills just the code with a TOTP secret, or returns `needs_human` with `reason: mfa_required` without one. Any other page with a code field is not a login page and nothing is typed. A code field is filled only when it is the one field to type in its form, and never in a form that turns something off. One code goes out per password step; a code page that comes back with an error, or a login form, on the page right after the code is a rejected code. When less than 3 seconds of the current code are left, it waits for the next one.
+
+After three failed logins in five minutes, the profile is paused (`rate_limited`), so a wrong password cannot lock the account.
 
 ## Why not let the agent type the password?
 

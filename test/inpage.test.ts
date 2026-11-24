@@ -349,6 +349,164 @@ describe('pages a person has to finish (#2)', () => {
   });
 });
 
+describe('code: the one-time-code step after the password (#1)', () => {
+  const code = () => autologinInpage('code', {});
+
+  it('tags the code field and the submit button of its form', () => {
+    document.body.innerHTML = `<form><input name="otp" inputmode="numeric"><button type="button">Resend code</button><button type="submit">Verify</button></form>`;
+    expect(code()).toEqual({ found: true, hasSubmit: true });
+    expect(roleOf('input')).toBe('code');
+    expect(document.querySelector(`[${FIELD_ATTR}="submit"]`)!.textContent).toBe('Verify');
+  });
+
+  it('finds the Verify button next to a field outside any form, and never one before the field', () => {
+    document.body.innerHTML = `<div id="step"><button>Continue</button><label>Code from your authenticator app <input id="otp" autocomplete="one-time-code"></label><button>Cancel</button><button>Verify</button></div>`;
+    expect(code()).toEqual({ found: true, hasSubmit: true });
+    expect(document.querySelector(`[${FIELD_ATTR}="submit"]`)!.textContent).toBe('Verify');
+  });
+
+  it('reports a code field without a button, and submits its form instead', () => {
+    document.body.innerHTML = `<form><input name="totp"></form>`;
+    const onSubmit = vi.fn((e: Event) => e.preventDefault());
+    document.querySelector('form')!.addEventListener('submit', onSubmit);
+    expect(code()).toEqual({ found: true, hasSubmit: false });
+    expect(autologinInpage('submit', {})).toBe('submitted');
+    expect(onSubmit).toHaveBeenCalledOnce();
+    document.body.innerHTML = `<input autocomplete="one-time-code"><a href="/help">Help</a>`;
+    expect(code()).toEqual({ found: true, hasSubmit: false });
+    expect(autologinInpage('submit', {})).toBe('none');
+  });
+
+  it('finds nothing without a clear one-time-code field, and drops code and button tags from earlier steps', () => {
+    document.body.innerHTML = `<input name="promo_code" ${FIELD_ATTR}="code"><input autocomplete="one-time-code" style="display:none"><button ${FIELD_ATTR}="submit">Verify</button>`;
+    expect(code()).toEqual({ found: false, hasSubmit: false });
+    expect(document.querySelectorAll(`[${FIELD_ATTR}]`)).toHaveLength(0);
+  });
+
+  it('clears the code field like the others', () => {
+    document.body.innerHTML = `<input name="otp" value="123456">`;
+    code();
+    expect(autologinInpage('clear', { role: 'code' })).toBe(true);
+    expect(document.querySelector('input')!.value).toBe('');
+  });
+});
+
+describe('code: review fixes (#1 review)', () => {
+  const code = () => autologinInpage('code', {});
+
+  it('keeps the password tag, so a failed code step can still clear the password', () => {
+    document.body.innerHTML = `<form><input id="u" ${FIELD_ATTR}="username"><input type="password" style="display:none" ${FIELD_ATTR}="password" value="hunter2"><input name="otp"><button type="submit">Verify</button></form>`;
+    expect(code()).toEqual({ found: true, hasSubmit: true });
+    expect(roleOf('#u')).toBe('username');
+    expect(roleOf('input[type="password"]')).toBe('password');
+    expect(autologinInpage('clear', { role: 'password' })).toBe(true);
+    expect(document.querySelector<HTMLInputElement>('input[type="password"]')!.value).toBe('');
+  });
+
+  it('only takes a Verify / Next kind of submit button in the form: never Back, Resend or Cancel', () => {
+    document.body.innerHTML = `<form><input name="token-otp_token"><button type="submit" name="wizard_goto_step" value="auth">Back</button><button type="submit">Next</button></form>`;
+    expect(code()).toEqual({ found: true, hasSubmit: true });
+    expect(document.querySelector(`[${FIELD_ATTR}="submit"]`)!.textContent).toBe('Next');
+    document.body.innerHTML = `<form><input name="otp"><button type="submit">Back</button><button type="submit">Resend code</button></form>`;
+    const onSubmit = vi.fn((e: SubmitEvent) => {
+      e.preventDefault();
+      return e.submitter;
+    });
+    document.querySelector('form')!.addEventListener('submit', onSubmit);
+    expect(code()).toEqual({ found: true, hasSubmit: false });
+    expect(autologinInpage('submit', {})).toBe('submitted');
+    expect(onSubmit).toHaveBeenCalledOnce();
+    expect(onSubmit.mock.results[0]!.value).toBeNull();
+  });
+
+  it('submits the code form, not the form of a hidden password field', () => {
+    document.body.innerHTML = `<form id="pw"><input type="password" style="display:none"></form><form id="c"><input name="otp"></form>`;
+    detect();
+    document.querySelector('input[type="password"]')!.setAttribute(FIELD_ATTR, 'password');
+    const submitted: string[] = [];
+    for (const form of Array.from(document.querySelectorAll('form'))) form.addEventListener('submit', (e) => (e.preventDefault(), submitted.push(form.id)));
+    expect(code()).toEqual({ found: true, hasSubmit: false });
+    expect(autologinInpage('submit', {})).toBe('submitted');
+    expect(submitted).toEqual(['c']);
+  });
+
+  it('reports a page of its own that asks only for a one-time code as a code step', () => {
+    document.body.innerHTML = `<form method="post"><label>Code <input name="user[otp_attempt]" autocomplete="one-time-code"></label><input type="submit" value="Verify"></form>`;
+    expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false, step: 'code' });
+    document.body.innerHTML = `<input name="otp" style="display:none"><button>Sign in with Google</button>`;
+    expect(detect()).toMatchObject({ blocker: 'sso' });
+  });
+});
+
+describe('code pages of their own: second review (#1 review 2)', () => {
+  it('takes a code page only when the code is the one field to type in its form or container', () => {
+    document.body.innerHTML = `<form><input type="email" name="email"><input name="otp" autocomplete="one-time-code"><button>Sign in</button></form>`;
+    expect(detect()).not.toHaveProperty('step', 'code');
+    document.body.innerHTML = `<div><div><input type="email" name="email"></div><div><input name="otp"></div><button>Verify</button></div>`;
+    expect(detect()).not.toHaveProperty('step', 'code');
+    document.body.innerHTML = `<main><div><label>Code <input name="otp"></label><button>Verify</button></div></main>`;
+    expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false, step: 'code' });
+  });
+
+  it('sees a code page also for a profile with a password selector, keeping the selector error', () => {
+    document.body.innerHTML = `<form><input name="otp" autocomplete="one-time-code"><button>Verify</button></form>`;
+    expect(detect({ selectors: { password: '#pw' } })).toEqual({
+      found: false,
+      hasUsername: false,
+      hasSubmit: false,
+      step: 'code',
+      error: 'The password selector did not match a visible field.',
+    });
+    document.body.innerHTML = `<p>Nothing here</p>`;
+    expect(detect({ selectors: { password: '#pw' } })).not.toHaveProperty('step');
+  });
+
+  it('still reports a captcha on a code page', () => {
+    document.body.innerHTML = `<input name="otp"><iframe src="https://www.google.com/recaptcha/api2/anchor?k=x"></iframe>`;
+    expect(detect()).toMatchObject({ blocker: 'captcha' });
+  });
+});
+
+describe('code fields that are not a login step (#1 review 3)', () => {
+  const code = () => autologinInpage('code', {});
+
+  it('never takes a form that turns something off or removes it, in the code action or as a code page', () => {
+    for (const markup of [
+      `<form><input name="otp_code" autocomplete="one-time-code"><button type="submit">Disable two-factor authentication</button></form>`,
+      `<form><input name="otp"><button type="submit">Verify</button><button type="button">Turn off</button></form>`,
+      `<div><input name="otp"><button>Remove device</button><button>Confirm</button></div>`,
+      `<form><input name="otp"><input type="submit" value="İki adımlı doğrulamayı devre dışı bırak"></form>`,
+    ]) {
+      document.body.innerHTML = markup;
+      expect(code()).toEqual({ found: false, hasSubmit: false });
+      expect(detect()).not.toHaveProperty('step', 'code');
+    }
+  });
+
+  it('takes a Close button next to Verify for what it is, and copes with a field right under <html> (#1 review 4)', () => {
+    document.body.innerHTML = `<div role="dialog"><input name="otp"><button>Doğrula</button><button>Kapat</button></div>`;
+    expect(code()).toEqual({ found: true, hasSubmit: true });
+    document.body.innerHTML = '';
+    const stray = document.createElement('input');
+    stray.name = 'otp';
+    document.documentElement.appendChild(stray);
+    expect(() => code()).not.toThrow();
+    stray.remove();
+  });
+
+  it('takes a code field only when it is the one field to type in its form or container', () => {
+    document.body.innerHTML = `<form><input name="display_name" value="QA"><input name="otp"><button type="submit">Verify</button></form>`;
+    expect(code()).toEqual({ found: false, hasSubmit: false });
+    document.body.innerHTML = `<form><input type="password" style="display:none"><input name="otp"><button type="submit">Verify</button></form>`;
+    expect(code()).toEqual({ found: true, hasSubmit: true });
+    // The login's own username field, or a read-only one showing the account, does not count.
+    document.body.innerHTML = `<form><input type="email" ${FIELD_ATTR}="username"><input name="otp"><button type="submit">Verify</button></form>`;
+    expect(code()).toEqual({ found: true, hasSubmit: true });
+    document.body.innerHTML = `<form><input type="email" readonly value="qa@example.com"><input name="otp"><button type="submit">Verify</button></form>`;
+    expect(code()).toEqual({ found: true, hasSubmit: true });
+  });
+});
+
 describe('pages a person has to finish: no false alarms (#2 review)', () => {
   it('does not take a passkey settings link on a logged-in page for a passkey login', () => {
     for (const markup of ['<nav><a href="/settings">Security: add a passkey</a></nav><p>Dashboard</p>', '<p>Welcome</p><button>Create a passkey</button>']) {

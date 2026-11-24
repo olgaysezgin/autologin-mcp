@@ -75,6 +75,11 @@ describe('renderProfile / appendBlock / removeProfile', () => {
     expect(parse(block)).toEqual({ STAGING_URL: 'staging.example.com', STAGING_USERNAME: 'qa@x.io', STAGING_PASSWORD: `p'w"#` });
   });
 
+  it('adds a TOTP secret line when there is one (#1)', () => {
+    const withTotp = renderProfile({ name: 'app', url: 'x.test', username: 'u', password: 'p', totpSecret: 'GEZD GNBV' });
+    expect(parse(withTotp)).toEqual({ APP_URL: 'x.test', APP_USERNAME: 'u', APP_PASSWORD: 'p', APP_TOTP_SECRET: 'GEZD GNBV' });
+  });
+
   it.each([
     ['', 'B'],
     ['x', 'x\n\nB'],

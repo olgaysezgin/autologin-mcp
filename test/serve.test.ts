@@ -70,6 +70,29 @@ describe('createDefaultDeps', () => {
   });
 });
 
+describe('createDefaultDeps: TOTP code pages (#1 review)', () => {
+  it('lets a code page of its own get one code right after a password step, then uses that step up', async () => {
+    const { deps, bridge } = createDefaultDeps({ env: { AUTOLOGIN_HOME: dir }, home: dir, platform: 'linux' });
+    const profile = buildStore({ APP_URL: 'localhost:3000', APP_USERNAME: 'u', APP_PASSWORD: 'p', APP_TOTP_SECRET: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ' })
+      .profiles[0] as UsableProfile;
+    const askCodeOnly = async () => {
+      const ticket = await bridge.issue(profile);
+      const [, base, token] = /"(http:[^"]+)\/v1\/filler\/([\w-]+)\.js"/.exec(ticket.function)!;
+      const script = await (await fetch(`${base}/v1/filler/${token}.js`, { headers: { origin: 'http://localhost:3000' } })).text();
+      const nonce = /const codeNonce = "([\w-]+)";/.exec(script)![1];
+      const res = await fetch(`${base}/v1/code/${token}`, { method: 'POST', headers: { origin: 'http://localhost:3000' }, body: JSON.stringify({ nonce, codeOnly: true }) });
+      return res.status;
+    };
+    expect(await askCodeOnly()).toBe(409);
+    deps.results.record('app', { status: 'submitted' }, 'bridge');
+    expect(deps.results.codeStep('app')).toBe('after_password');
+    expect(await askCodeOnly()).toBe(200);
+    expect(deps.results.codeStep('app')).toBe('after_code');
+    expect(await askCodeOnly()).toBe(409);
+    await bridge.close();
+  });
+});
+
 describe('serve', () => {
   async function start(input?: EventEmitter) {
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();

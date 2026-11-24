@@ -101,7 +101,8 @@
           "print-config for Codex CLI, Gemini CLI, Cursor, VS Code, Claude Desktop and Hermes Agent",
           "Profiles from scripts and CI with add --password-stdin",
           "Identifier-first logins: the email first, then the password on the same page",
-          "Hands single sign-on, passkeys, captchas and one-time codes to a person (needs_human) without releasing the credentials"
+          "Fills authenticator (TOTP) codes after the password; the secret stays on your machine",
+          "Hands single sign-on, passkeys, captchas and other one-time codes to a person (needs_human) without releasing the credentials"
         ],
         "sameAs": [
           "https://github.com/olgaysezgin/autologin-mcp",
@@ -168,7 +169,7 @@
           {
             "@type": "Question",
             "name": "Does autologin-mcp support SSO, two-factor authentication or multi-step logins?",
-            "acceptedAnswer": { "@type": "Answer", "text": "It fills the common username and password form on the app's own page, including React, Vue and Angular forms and identifier-first logins (email, then the password field on the same page). Single sign-on, passkeys, captchas and a one-time code after the password are recognised and handed to you instead of failing or retrying. Filling TOTP codes, logins that navigate to a second document, and iframes are on the roadmap." }
+            "acceptedAnswer": { "@type": "Answer", "text": "It fills the common username and password form on the app's own page, including React, Vue and Angular forms and identifier-first logins (email, then the password field on the same page). With a TOTP secret in the profile, it also fills the one-time code an authenticator app would show after the password. Single sign-on, passkeys, captchas, and a one-time code the profile has no TOTP secret for are recognised and handed to you instead of failing or retrying. Logins that navigate to a second document, and iframes, are on the roadmap." }
           },
           {
             "@type": "Question",
@@ -331,7 +332,7 @@
               <li data-reveal class="active"><button type="button" aria-expanded="true" aria-controls="shot-1"><span class="num">01</span>The agent calls login</button><div class="body"><p>When the tab under test shows a login form, a 401/403, a login redirect or a "session expired" message, the agent calls the <code>login</code> tool with the tab's URL. autologin-mcp picks the matching profile.</p></div><span class="bar"></span></li>
               <li data-reveal><button type="button" aria-expanded="false" aria-controls="shot-2"><span class="num">02</span>It gets a one-time script</button><div class="body"><p>The result holds a small loader script that contains only a one-time URL on 127.0.0.1. It expires after 60 seconds and never contains a credential.</p></div><span class="bar"></span></li>
               <li data-reveal><button type="button" aria-expanded="false" aria-controls="shot-3"><span class="num">03</span>The page fetches the credentials</button><div class="body"><p>The agent runs the script in the tab. The page looks for the login form first, and only then asks the local bridge for the credentials, which it releases only if the browser-set <code>Origin</code> header matches the profile's site. A page on another site, or one without a login form, gets nothing.</p></div><span class="bar"></span></li>
-              <li data-reveal><button type="button" aria-expanded="false" aria-controls="shot-4"><span class="num">04</span>The form is filled and submitted</button><div class="body"><p>autologin-mcp fills the fields the way React, Vue and Angular forms expect, submits, and returns <code>success</code>, or <code>failed</code> with the page's own error message. Single sign-on, passkeys, captchas and one-time codes are handed to you as <code>needs_human</code>. Then the agent continues the task.</p></div><span class="bar"></span></li>
+              <li data-reveal><button type="button" aria-expanded="false" aria-controls="shot-4"><span class="num">04</span>The form is filled and submitted</button><div class="body"><p>autologin-mcp fills the fields the way React, Vue and Angular forms expect, submits, and returns <code>success</code>, or <code>failed</code> with the page's own error message. With a TOTP secret it fills the authenticator code too. Single sign-on, passkeys, captchas and other one-time codes are handed to you as <code>needs_human</code>. Then the agent continues the task.</p></div><span class="bar"></span></li>
             </ol>
           </div>
           <div class="panel" data-reveal>
@@ -372,7 +373,8 @@
 
 <span class="t-dim"># Three failed logins in five minutes pause the
 # profile, so a wrong password cannot lock the account.
-# needs_human (SSO, passkey, captcha, a code) goes to you.</span></pre>
+# needs_human (SSO, passkey, captcha, a code with
+# no TOTP secret in the profile) goes to you.</span></pre>
           </div>
         </div>
         <p data-reveal class="cdp-note">With Chrome remote debugging turned on, autologin-mcp fills the tab itself over the Chrome DevTools Protocol (CDP), and the agent runs nothing. <a href="how-it-works.html">Bridge mode and CDP mode in detail</a></p>
@@ -510,7 +512,7 @@
           <details data-reveal><summary>Which agents and browser tools does autologin-mcp work with?</summary><p>It is built and tested for Claude Code with Claude in Chrome, and also works with Playwright MCP, chrome-devtools-mcp and Puppeteer. Codex CLI, Gemini CLI, Cursor, VS Code, Claude Desktop and Hermes Agent can run the stdio server, and <code>npx autologin-mcp print-config</code> prints their configuration; the installer, skill and guard hook are Claude Code features today.</p></details>
           <details data-reveal><summary>Do I need to enable Chrome remote debugging?</summary><p>No. The default bridge mode needs no browser setup. Remote debugging enables CDP mode, which helps when the app's Content-Security-Policy blocks the bridge.</p></details>
           <details data-reveal><summary>Can a malicious page trick the agent into sending my credentials to it?</summary><p>A profile only fills pages whose host matches its root URL. The bridge checks the Origin header that the browser sets and page scripts cannot fake, and CDP mode reads the tab's URL from Chrome. A page on another site receives nothing.</p></details>
-          <details data-reveal><summary>Does autologin-mcp support SSO, two-factor authentication or multi-step logins?</summary><p>It fills the common username and password form on the app's own page, including React, Vue and Angular forms and identifier-first logins (email, then the password field on the same page). Single sign-on, passkeys, captchas and a one-time code after the password are recognised and handed to you instead of failing or retrying. Filling TOTP codes, logins that navigate to a second document, and iframes are on the roadmap.</p></details>
+          <details data-reveal><summary>Does autologin-mcp support SSO, two-factor authentication or multi-step logins?</summary><p>It fills the common username and password form on the app's own page, including React, Vue and Angular forms and identifier-first logins (email, then the password field on the same page). With a TOTP secret in the profile, it also fills the one-time code an authenticator app would show after the password. Single sign-on, passkeys, captchas, and a one-time code the profile has no TOTP secret for are recognised and handed to you instead of failing or retrying. Logins that navigate to a second document, and iframes, are on the roadmap.</p></details>
           <details data-reveal><summary>Is autologin-mcp free?</summary><p>Yes. autologin-mcp is open source under the MIT license.</p></details>
         </div>
         <p data-reveal class="faq-more">More answers: <a href="faq.html">FAQ</a> · <a href="troubleshooting.html">Troubleshooting</a> · <a href="llms.txt">llms.txt</a> for AI assistants</p>

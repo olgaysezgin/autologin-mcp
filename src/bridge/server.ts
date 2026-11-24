@@ -1,10 +1,11 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { FailureLimiter } from '../ratelimit.js';
-import type { NoFormContext } from '../results.js';
+import type { CodeStep, NoFormContext } from '../results.js';
 import { matchesUrl } from '../store/match.js';
 import type { UsableProfile } from '../store/profiles.js';
+import { freshTotpCode } from '../totp.js';
 import { agentExpression, agentFunction, agentScript, fillerScript, REUSED_NOTE, type BridgeResult, type BridgeTiming } from './filler.js';
 
 export const BRIDGE_TIMING: BridgeTiming = { detectTimeoutMs: 5_000, verifyTimeoutMs: 10_000, pollMs: 250, earlyFailAfterMs: 1_500 };
@@ -32,6 +33,12 @@ export interface BridgeOptions {
   maxReleases?: number;
   /** How long a re-run of a used script waits for the first run's result. */
   reuseWaitMs?: number;
+  /** Whether a page that asks only for a one-time code is a step of a login in progress (ResultLog.codeStep). */
+  codeStepContext?: (profile: string) => CodeStep;
+  /** Called when a page that asks only for the code got one: that password step is used up (serve.ts records it). */
+  onCodeOnly?: (profile: string) => void;
+  /** Waits before handing out a one-time code that is about to expire (tests replace it). */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 interface Ticket {
@@ -40,13 +47,27 @@ interface Ticket {
   /** The filler was served: the script ran (or started to). A second run only gets the first run's outcome. */
   started: boolean;
   released: boolean;
+  /** The one-time code for this login was handed out (a TOTP profile gets one code per login). */
+  codeReleased: boolean;
+  /**
+   * A TOTP profile: a key that comes only with the run's filler script, never in a tool result. The code endpoint
+   * answers only to it, so holding the token (as the agent does) is not enough to ask for a code.
+   */
+  codeNonce: string | null;
+  /** Set when the filler is served: what a code page of its own means for this run. */
+  codeStep: CodeStep;
   result: BridgeResult | null;
   waiters: Array<(result: BridgeResult | null) => void>;
 }
 
+const sameSecret = (a: string, b: string): boolean => {
+  const [x, y] = [Buffer.from(a), Buffer.from(b)];
+  return x.length === y.length && timingSafeEqual(x, y);
+};
+
 const REUSED_UNKNOWN = { status: 'expired', hint: 'This login script was already used and its outcome is unknown; call login_status, or login again.' };
 
-const TOKEN_PATH = /^\/v1\/(filler|credentials|result)\/([A-Za-z0-9_-]{16,})(?:\.js)?$/;
+const TOKEN_PATH = /^\/v1\/(filler|credentials|code|result)\/([A-Za-z0-9_-]{16,})(?:\.js)?$/;
 const MAX_BODY = 8_192;
 
 async function readBody(req: http.IncomingMessage): Promise<string> {
@@ -69,12 +90,14 @@ export class BridgeServer {
   private readonly timing: BridgeTiming;
   private readonly now: () => number;
   private readonly reuseWaitMs: number;
+  private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(private readonly options: BridgeOptions = {}) {
     this.ttlMs = options.ttlMs ?? 60_000;
     this.timing = options.timing ?? BRIDGE_TIMING;
     this.now = options.now ?? Date.now;
     this.reuseWaitMs = options.reuseWaitMs ?? 25_000;
+    this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.releases = new FailureLimiter(options.maxReleases ?? 20, 5 * 60_000, this.now);
   }
 
@@ -104,7 +127,8 @@ export class BridgeServer {
     const now = this.now();
     for (const [token, ticket] of this.tickets) if (ticket.expiresAt <= now) this.tickets.delete(token);
     const token = randomBytes(24).toString('base64url');
-    this.tickets.set(token, { profile, expiresAt: now + this.ttlMs, started: false, released: false, result: null, waiters: [] });
+    const codeNonce = profile.totp === undefined ? null : randomBytes(24).toString('base64url');
+    this.tickets.set(token, { profile, expiresAt: now + this.ttlMs, started: false, released: false, codeReleased: false, codeNonce, codeStep: null, result: null, waiters: [] });
     const fn = agentFunction(base, token);
     return { profile: profile.name, expiresInSeconds: Math.round(this.ttlMs / 1000), function: fn, script: agentScript(fn), expression: agentExpression(fn) };
   }
@@ -131,7 +155,7 @@ export class BridgeServer {
 
     const match = TOKEN_PATH.exec(new URL(req.url!, base).pathname);
     if (match === null) return send(404, { status: 'error', hint: 'Unknown autologin-mcp bridge URL.' });
-    const [, kind, token] = match as unknown as [string, 'filler' | 'credentials' | 'result', string];
+    const [, kind, token] = match as unknown as [string, 'filler' | 'credentials' | 'code' | 'result', string];
     const ticket = this.tickets.get(token);
     if (ticket === undefined || ticket.expiresAt <= this.now()) {
       return send(410, { status: 'expired', hint: 'This login script expired; call login again.' });
@@ -153,14 +177,56 @@ export class BridgeServer {
         return send(200, answer(first === null ? REUSED_UNKNOWN : { ...first, note: REUSED_NOTE }), 'text/javascript');
       }
       ticket.started = true;
-      const script = fillerScript(base, token, this.timing, this.options.noFormContext?.(profile.name) ?? null, {
-        selectors: { username: profile.selectors.username, password: profile.selectors.password, submit: profile.selectors.submit },
-        successSelector: profile.selectors.success,
-      });
+      // The run gets its own time window: a long login (a code step after the password) may outlast the
+      // window that was left for running the script.
+      ticket.expiresAt = Math.max(ticket.expiresAt, this.now() + this.ttlMs);
+      ticket.codeStep = this.options.codeStepContext?.(profile.name) ?? null;
+      const script = fillerScript(
+        base,
+        token,
+        this.timing,
+        this.options.noFormContext?.(profile.name) ?? null,
+        {
+          selectors: { username: profile.selectors.username, password: profile.selectors.password, submit: profile.selectors.submit },
+          successSelector: profile.selectors.success,
+          totp: profile.totp !== undefined,
+          codeStep: ticket.codeStep,
+        },
+        ticket.codeNonce,
+      );
       return send(200, script, 'text/javascript');
     }
 
     if (req.method !== 'POST') return send(405, { status: 'error', hint: 'Use POST.' });
+
+    if (kind === 'code') {
+      // The current one-time code, never the TOTP secret: once per login, to the run's own filler script on the
+      // profile's site, while the run is still going.
+      if (!allowed) return send(403, mismatch);
+      if (profile.totp === undefined || ticket.codeNonce === null) return send(404, { status: 'no_totp', hint: `Profile "${profile.name}" has no TOTP secret.` });
+      type CodeRequest = { nonce?: unknown; codeOnly?: unknown } | null;
+      let body: CodeRequest = null;
+      try {
+        body = JSON.parse(await readBody(req)) as CodeRequest;
+      } catch {
+        // no or malformed body: refused below
+      }
+      const nonce = body?.nonce;
+      if (typeof nonce !== 'string' || !sameSecret(nonce, ticket.codeNonce)) {
+        return send(403, { status: 'refused', hint: 'Only the login script of this ticket can ask for its one-time code.' });
+      }
+      if (ticket.result !== null) return send(410, { status: 'finished', hint: 'This login already reported its outcome; call login again.' });
+      // A page that asks only for the code gets one only right after this profile's password step, judged now: an
+      // earlier script may have used that step up meanwhile (#1 review).
+      const codeOnly = body?.codeOnly === true;
+      if (codeOnly && (this.options.codeStepContext?.(profile.name) ?? null) !== 'after_password') {
+        return send(409, { status: 'refused', hint: 'There is no login of this profile in progress that waits for a code on a page of its own.' });
+      }
+      if (ticket.codeReleased) return send(409, { status: 'already_used', hint: 'This login already got its one-time code.' });
+      ticket.codeReleased = true;
+      if (codeOnly) this.options.onCodeOnly?.(profile.name);
+      return send(200, { code: await freshTotpCode(profile.totp, { now: this.now, sleep: this.sleep }) });
+    }
 
     if (kind === 'credentials') {
       if (!allowed) return send(403, mismatch);

@@ -2,6 +2,16 @@
 
 Every version below is the same version in `package.json`, the git tag `v<version>`, the npm package and the GitHub release. The release workflow refuses to publish when they disagree.
 
+## 1.4.0 - 2026-11-24
+
+- Authenticator codes (TOTP, [#1](https://github.com/olgaysezgin/autologin-mcp/issues/1), proposed by mrsarac): a profile can hold the account's TOTP secret (`<PROFILE>_TOTP_SECRET`, base32 or an `otpauth://totp/...` URI with its algorithm, digits and period). When the page asks for a one-time code after the password, autologin-mcp makes the current code on this machine (RFC 6238) and fills it, in CDP and bridge mode. The secret never leaves autologin-mcp: in bridge mode the page asks for the current code once, when it shows the code step, under the same origin check as the credentials.
+- A code the page rejects returns `failed` with `reason: totp_rejected` and counts toward the rate limit; the code and password fields are cleared. When less than 3 seconds of the current code are left, autologin-mcp waits for the next one.
+- A code page of its own (a server-rendered app that navigates after the password): CDP mode follows the tab there in the same run. In bridge mode the next `login` call fills just the code, but only on the document the tab loaded right after the password step, within a minute and still at its load address; without a TOTP secret it then returns `needs_human` with `reason: mfa_required` instead of `no_login_form`. Any other page with a code field is left alone as before.
+- Safety rails for codes: a code field is filled only when it is the one field to type in its form, and never in a form with a button that turns something off or removes it; one code per password step. In bridge mode a code page that navigates returns `submitted` with `reason: code_submitted`; if the page right after the code is the code page again with an error message, or the app's login form, the next `login` call returns `failed` with `reason: totp_rejected` (counted toward the rate limit) without sending another code.
+- In bridge mode only the login's own script can ask for the code: the code endpoint wants a key that comes with that script (never in a tool result), and answers no more once the login reported its outcome. A started script also gets a fresh time window, so a long login with a code step does not run out.
+- `add --totp` asks for the TOTP secret hidden, or reads it as a second piped line with `--password-stdin`. A value after `--totp` is refused, so a secret cannot end up as the profile name or in the shell history. `list` and `list_profiles` show which profiles have one; the secret and the code are redacted from every result.
+- Without a TOTP secret, the code step is handed to a person as before (`needs_human`, `reason: mfa_required`).
+
 ## 1.3.3 - 2026-11-24
 
 - A login whose form went away just as the wait for the outcome ran out (a busy page, or a slow login close to the 10-second limit) was reported as `failed` with `still_on_login_form` and counted toward the rate limit. autologin-mcp now looks once more before calling it a failure, in CDP and bridge mode; a form that is back on that look still fails.

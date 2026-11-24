@@ -56,6 +56,8 @@ In a script or CI job, pipe the password in instead of typing it:
 printf '%s' "$STAGING_PASSWORD" | npx autologin-mcp add staging --url staging.example.com --username qa@example.com --password-stdin -y
 ```
 
+Does the test account ask for a code from an authenticator app after the password? Add `--totp` and give it the account's TOTP secret too; autologin-mcp then fills the code. See [Authenticator codes](configuration.md#authenticator-codes-totp).
+
 Check what the agent will see:
 
 ```bash

@@ -20,3 +20,4 @@ describe('FailureLimiter', () => {
     expect(limiter.isBlocked('x')).toBe(true);
   });
 });
+
