@@ -34,3 +34,4 @@ Key facts:
 - [Full documentation in one file](https://olgaysezgin.github.io/autologin-mcp/llms-full.txt)
 - [Source code on GitHub](https://github.com/olgaysezgin/autologin-mcp)
 - [npm package](https://www.npmjs.com/package/autologin-mcp)
+- [Entry in the official MCP Registry](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.olgaysezgin/autologin-mcp): `io.github.olgaysezgin/autologin-mcp`

@@ -62,7 +62,7 @@ npx autologin-mcp add
 
 Upgrade with `npx autologin-mcp@latest install`, remove with `npx autologin-mcp uninstall`. Step-by-step guide: [Getting started](docs/getting-started.md).
 
-Another agent? `npx autologin-mcp print-config --client codex` (or `gemini`, `cursor`, `vscode`, `claude-desktop`, `hermes`) prints its configuration. See [Agents and browser tools](docs/clients.md).
+Another agent? `npx autologin-mcp print-config --client codex` (or `gemini`, `cursor`, `vscode`, `claude-desktop`, `hermes`) prints its configuration. See [Agents and browser tools](docs/clients.md). autologin-mcp is also in the official MCP Registry as `io.github.olgaysezgin/autologin-mcp`.
 
 ## Features
 

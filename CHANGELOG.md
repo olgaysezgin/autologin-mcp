@@ -2,6 +2,12 @@
 
 Every version below is the same version in `package.json`, the git tag `v<version>`, the npm package and the GitHub release. The release workflow refuses to publish when they disagree.
 
+## 1.3.2 - 2026-11-24
+
+The code is the same as 1.3.1.
+
+- autologin-mcp is in the official MCP Registry as `io.github.olgaysezgin/autologin-mcp`: `package.json` names it with `mcpName`, `server.json` describes the entry, and the release workflow publishes it with every release.
+
 ## 1.3.1 - 2026-11-23
 
 Documentation only; the code is the same as 1.3.0.

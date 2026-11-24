@@ -1,4 +1,5 @@
-// Keeps one version everywhere: package.json, the git tag, npm, CHANGELOG.md, the docs and the website.
+// Keeps one version everywhere: package.json, the git tag, npm, CHANGELOG.md, the docs, the website and
+// server.json (the entry in the official MCP Registry, published by the release workflow).
 //
 //   node scripts/release.mjs sync              write the package.json version into README, docs and the website
 //                                              (`npm version` runs this before it commits and tags)
@@ -12,7 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const { name, version } = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+const { name, version, mcpName } = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const tag = `v${version}`;
 /** npm lists a temporary "0.0.0-stage" version while it processes a new package. */
 const PLACEHOLDER = /-stage$/;
@@ -35,6 +36,7 @@ function mentionRules() {
   return [
     { files: ['README.md', ...docs], patterns: [new RegExp(`${name}@(${SEMVER})`, 'g'), new RegExp(`${name}-(${SEMVER})\\.tgz`, 'g')] },
     { files: ['docs/index.html'], patterns: [new RegExp(`"softwareVersion": "(${SEMVER})"`, 'g'), new RegExp(`· v(${SEMVER})<`, 'g')] },
+    { files: ['server.json'], patterns: [new RegExp(`"version": "(${SEMVER})"`, 'g')] },
   ];
 }
 
@@ -113,7 +115,11 @@ async function npmState() {
 async function check({ offline, forRelease }) {
   const wrong = mismatches();
   if (wrong.length > 0) fail(`these mention another version than package.json (${version}); run: node scripts/release.mjs sync\n  ${wrong.join('\n  ')}`);
-  ok(`README, docs and website all say ${version}`);
+  ok(`README, docs, website and server.json all say ${version}`);
+
+  const registryName = JSON.parse(read('server.json')).name;
+  if (registryName !== mcpName) fail(`server.json is named "${registryName}" but package.json's mcpName is "${mcpName}"; the MCP Registry needs them equal`);
+  ok(`server.json and package.json both name the MCP Registry entry ${mcpName}`);
 
   if (changelogSection(version) === null) fail(`CHANGELOG.md has no "## ${version}" section`);
   ok(`CHANGELOG.md describes ${version}`);

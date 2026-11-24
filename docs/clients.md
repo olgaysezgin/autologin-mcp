@@ -65,6 +65,8 @@ Then add profiles with `npx autologin-mcp add`. Keep in mind:
 - The `install` command, the skill and the guard hook are for Claude Code only. Other agents get the server's built-in instructions, but nothing enforces them. Deny `~/.autologin-mcp` in your agent's permission settings, if it has them.
 - Agents other than Claude Code are not tested yet. Reports and pull requests are welcome.
 
+autologin-mcp is also in the [official MCP Registry](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.olgaysezgin/autologin-mcp) as `io.github.olgaysezgin/autologin-mcp`, so clients and directories that read the registry can find it. The entry starts the same `npx autologin-mcp` stdio server.
+
 ## Browsers
 
 - **Google Chrome** is supported and tested in both modes. Other Chromium-based browsers should work the same way.
