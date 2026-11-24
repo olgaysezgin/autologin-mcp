@@ -216,7 +216,7 @@ After submitting, autologin-mcp watches the page for up to 10 seconds:
 | What it sees | Result |
 |---|---|
 | The element in `<PROFILE>_SUCCESS_SELECTOR` appears | `success` |
-| The password field disappears (two checks in a row) | `success` |
+| The password field disappears (two checks in a row; when it goes away right at the 10-second mark, one more check decides) | `success` |
 | A new error message appears (the message the field points to with `aria-describedby`/`aria-errormessage`, `role="alert"`, or an error-styled element) | `failed`, with that message as `hint` |
 | The password field gives way to a one-time-code field (`autocomplete="one-time-code"`, or a name such as `otp` or `totp_code`) | `needs_human`, `reason: mfa_required`: a person enters the code |
 | The page starts navigating (bridge mode) | `submitted`: the agent should look at the page |

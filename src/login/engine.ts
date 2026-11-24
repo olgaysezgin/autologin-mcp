@@ -226,6 +226,7 @@ export async function performLogin(
 
     const submittedAt = clock.now();
     let goneStreak = 0;
+    let lookedAgain = false;
     let last: StateResult | null = null;
     for (;;) {
       await clock.sleep(timing.pollMs);
@@ -245,7 +246,12 @@ export async function performLogin(
           if (newError && clock.now() - submittedAt >= timing.earlyFailAfterMs) break;
         }
       }
-      if (clock.now() - submittedAt >= timing.verifyTimeoutMs) break;
+      if (clock.now() - submittedAt >= timing.verifyTimeoutMs) {
+        // The password field was gone on the last look: look once more before calling the login failed,
+        // so a page that was busy up to the deadline is not reported (and rate-limited) as a failure.
+        if (goneStreak === 0 || lookedAgain) break;
+        lookedAgain = true;
+      }
     }
     await clearPassword();
     return {

@@ -74,6 +74,37 @@ describe('bridgeLogin', () => {
     expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toMatchObject({ status: 'failed', hint: expect.stringContaining('Still on the login form') });
   });
 
+  describe('a page that is busy when the wait runs out', () => {
+    /** Blocks the page's only thread, like a heavy render right after the login. */
+    const busy = (ms: number) => {
+      const end = Date.now() + ms;
+      while (Date.now() < end);
+    };
+
+    it('looks once more when the form went away just before', async () => {
+      app(() =>
+        setTimeout(() => {
+          document.querySelector('#login')!.remove();
+          busy(TIMING.verifyTimeoutMs + 20);
+        }, 1),
+      );
+      expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toEqual({ status: 'success', url: location.href });
+    });
+
+    it('still fails when the form is back on that last look', async () => {
+      app(() =>
+        setTimeout(() => {
+          const form = document.querySelector('#login')!;
+          const parent = form.parentElement!;
+          form.remove();
+          busy(TIMING.verifyTimeoutMs + 20);
+          setTimeout(() => parent.prepend(form), 0);
+        }, 1),
+      );
+      expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toMatchObject({ status: 'failed', reason: 'still_on_login_form' });
+    });
+  });
+
   it('reports that the page navigated after submitting', async () => {
     app(() => window.dispatchEvent(new Event('beforeunload')));
     expect(await bridgeLogin(autologinInpage, CREDS, TIMING)).toMatchObject({ status: 'submitted', hint: expect.stringContaining('navigated') });

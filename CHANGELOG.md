@@ -2,6 +2,11 @@
 
 Every version below is the same version in `package.json`, the git tag `v<version>`, the npm package and the GitHub release. The release workflow refuses to publish when they disagree.
 
+## 1.3.3 - 2026-11-24
+
+- A login whose form went away just as the wait for the outcome ran out (a busy page, or a slow login close to the 10-second limit) was reported as `failed` with `still_on_login_form` and counted toward the rate limit. autologin-mcp now looks once more before calling it a failure, in CDP and bridge mode; a form that is back on that look still fails.
+- README: autologin-mcp is also listed on Glama.
+
 ## 1.3.2 - 2026-11-24
 
 The code is the same as 1.3.1.

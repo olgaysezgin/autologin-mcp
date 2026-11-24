@@ -130,6 +130,22 @@ describe('performLogin', () => {
     expect(page.calls.at(-1)).toBe('clear');
   });
 
+  it('looks once more when the password field goes away just as the wait runs out', async () => {
+    const clock = fakeClock();
+    const page = new FakePage([FOUND], [onForm(), ...Array<StateResult>(11).fill(onForm()), gone]);
+    expect(await performLogin(page, profile, timing, clock)).toMatchObject({ status: 'success' });
+    expect(clock.t).toBe(3_250);
+  });
+
+  it('still fails when that last look finds the password field back, or the page loading', async () => {
+    for (const last of [onForm(), loading]) {
+      const clock = fakeClock();
+      const page = new FakePage([FOUND], [onForm(), ...Array<StateResult>(11).fill(onForm()), gone, last]);
+      expect(await performLogin(page, profile, timing, clock)).toMatchObject({ status: 'failed', reason: 'still_on_login_form' });
+      expect(clock.t).toBe(3_250);
+    }
+  });
+
   it('waits for the full timeout when the error was already shown before submitting', async () => {
     const clock = fakeClock();
     const page = new FakePage([FOUND], [onForm('Session expired')]);

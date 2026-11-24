@@ -163,6 +163,7 @@ export async function bridgeLogin(
 
     const submittedAt = Date.now();
     let goneStreak = 0;
+    let lookedAgain = false;
     let last = before;
     for (;;) {
       await new Promise<void>((resolve) => {
@@ -187,7 +188,11 @@ export async function bridgeLogin(
         const newError = current.errorText !== null && current.errorText !== before.errorText;
         if (newError && Date.now() - submittedAt >= timing.earlyFailAfterMs) break;
       }
-      if (Date.now() - submittedAt >= timing.verifyTimeoutMs) break;
+      if (Date.now() - submittedAt >= timing.verifyTimeoutMs) {
+        // The form was gone on the last look: look once more before calling the login failed (see engine.ts).
+        if (goneStreak === 0 || lookedAgain) break;
+        lookedAgain = true;
+      }
     }
     inpage('clear', { role: 'password' });
     return finish('failed', {
