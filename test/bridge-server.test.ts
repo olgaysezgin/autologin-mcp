@@ -329,6 +329,26 @@ describe('BridgeServer: one-time codes for a TOTP profile (#1)', () => {
     expect(code).not.toBe(totpCode(totpProfile.totp!, boundary - 600));
   });
 
+  it('gives a code to a script on a code page of its own only during a login (#1 review 2)', async () => {
+    let step: 'after_password' | 'after_code' | null = null;
+    server = new BridgeServer({ now: () => NOW, codeStepContext: () => step });
+    const askCodeOnly = (ticket: BridgeTicket, nonce: string) => request(codeUrl(ticket), { method: 'POST', origin: ORIGIN, body: JSON.stringify({ nonce, codeOnly: true }) });
+    for (const value of [null, 'after_code'] as const) {
+      step = value;
+      const ticket = await server.issue(totpProfile);
+      const nonce = await startRun(ticket);
+      const refused = await askCodeOnly(ticket, nonce);
+      expect(refused.status).toBe(409);
+      expect(JSON.parse(refused.text)).toMatchObject({ status: 'refused', hint: expect.stringContaining('no login') });
+    }
+    step = 'after_password';
+    const ticket = await server.issue(totpProfile);
+    const script = (await request(urls(ticket).filler, { origin: ORIGIN })).text;
+    expect(script).toContain('"codeStep":"after_password"');
+    const nonce = /const codeNonce = "([\w-]+)";/.exec(script)![1]!;
+    expect(JSON.parse((await askCodeOnly(ticket, nonce)).text)).toEqual({ code: totpCode(totpProfile.totp!, NOW) });
+  });
+
   it('has no code for a profile without a TOTP secret', async () => {
     server = new BridgeServer();
     const ticket = await server.issue(profile);

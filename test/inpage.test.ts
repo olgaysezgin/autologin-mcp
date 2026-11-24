@@ -438,6 +438,35 @@ describe('code: review fixes (#1 review)', () => {
   });
 });
 
+describe('code pages of their own: second review (#1 review 2)', () => {
+  it('takes a code page only when the code is the one field to type in its form or container', () => {
+    document.body.innerHTML = `<form><input type="email" name="email"><input name="otp" autocomplete="one-time-code"><button>Sign in</button></form>`;
+    expect(detect()).not.toHaveProperty('step', 'code');
+    document.body.innerHTML = `<div><div><input type="email" name="email"></div><div><input name="otp"></div><button>Verify</button></div>`;
+    expect(detect()).not.toHaveProperty('step', 'code');
+    document.body.innerHTML = `<main><div><label>Code <input name="otp"></label><button>Verify</button></div></main>`;
+    expect(detect()).toEqual({ found: false, hasUsername: false, hasSubmit: false, step: 'code' });
+  });
+
+  it('sees a code page also for a profile with a password selector, keeping the selector error', () => {
+    document.body.innerHTML = `<form><input name="otp" autocomplete="one-time-code"><button>Verify</button></form>`;
+    expect(detect({ selectors: { password: '#pw' } })).toEqual({
+      found: false,
+      hasUsername: false,
+      hasSubmit: false,
+      step: 'code',
+      error: 'The password selector did not match a visible field.',
+    });
+    document.body.innerHTML = `<p>Nothing here</p>`;
+    expect(detect({ selectors: { password: '#pw' } })).not.toHaveProperty('step');
+  });
+
+  it('still reports a captcha on a code page', () => {
+    document.body.innerHTML = `<input name="otp"><iframe src="https://www.google.com/recaptcha/api2/anchor?k=x"></iframe>`;
+    expect(detect()).toMatchObject({ blocker: 'captcha' });
+  });
+});
+
 describe('pages a person has to finish: no false alarms (#2 review)', () => {
   it('does not take a passkey settings link on a logged-in page for a passkey login', () => {
     for (const markup of ['<nav><a href="/settings">Security: add a passkey</a></nav><p>Dashboard</p>', '<p>Welcome</p><button>Create a passkey</button>']) {

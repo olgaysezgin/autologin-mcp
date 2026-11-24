@@ -2,7 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { FailureLimiter } from '../ratelimit.js';
-import type { NoFormContext } from '../results.js';
+import type { CodeStep, NoFormContext } from '../results.js';
 import { matchesUrl } from '../store/match.js';
 import type { UsableProfile } from '../store/profiles.js';
 import { freshTotpCode } from '../totp.js';
@@ -33,6 +33,8 @@ export interface BridgeOptions {
   maxReleases?: number;
   /** How long a re-run of a used script waits for the first run's result. */
   reuseWaitMs?: number;
+  /** Whether a page that asks only for a one-time code is a step of a login in progress (ResultLog.codeStep). */
+  codeStepContext?: (profile: string) => CodeStep;
   /** Waits before handing out a one-time code that is about to expire (tests replace it). */
   sleep?: (ms: number) => Promise<void>;
 }
@@ -46,10 +48,12 @@ interface Ticket {
   /** The one-time code for this login was handed out (a TOTP profile gets one code per login). */
   codeReleased: boolean;
   /**
-   * A TOTP profile: a secret only the run's filler script carries. The code endpoint answers only to it, so
-   * neither the agent (which holds the token) nor another script on the page can ask for a code.
+   * A TOTP profile: a key that comes only with the run's filler script, never in a tool result. The code endpoint
+   * answers only to it, so holding the token (as the agent does) is not enough to ask for a code.
    */
   codeNonce: string | null;
+  /** Set when the filler is served: what a code page of its own means for this run. */
+  codeStep: CodeStep;
   result: BridgeResult | null;
   waiters: Array<(result: BridgeResult | null) => void>;
 }
@@ -122,7 +126,7 @@ export class BridgeServer {
     for (const [token, ticket] of this.tickets) if (ticket.expiresAt <= now) this.tickets.delete(token);
     const token = randomBytes(24).toString('base64url');
     const codeNonce = profile.totp === undefined ? null : randomBytes(24).toString('base64url');
-    this.tickets.set(token, { profile, expiresAt: now + this.ttlMs, started: false, released: false, codeReleased: false, codeNonce, result: null, waiters: [] });
+    this.tickets.set(token, { profile, expiresAt: now + this.ttlMs, started: false, released: false, codeReleased: false, codeNonce, codeStep: null, result: null, waiters: [] });
     const fn = agentFunction(base, token);
     return { profile: profile.name, expiresInSeconds: Math.round(this.ttlMs / 1000), function: fn, script: agentScript(fn), expression: agentExpression(fn) };
   }
@@ -174,6 +178,7 @@ export class BridgeServer {
       // The run gets its own time window: a long login (a code step after the password) may outlast the
       // window that was left for running the script.
       ticket.expiresAt = Math.max(ticket.expiresAt, this.now() + this.ttlMs);
+      ticket.codeStep = this.options.codeStepContext?.(profile.name) ?? null;
       const script = fillerScript(
         base,
         token,
@@ -183,6 +188,7 @@ export class BridgeServer {
           selectors: { username: profile.selectors.username, password: profile.selectors.password, submit: profile.selectors.submit },
           successSelector: profile.selectors.success,
           totp: profile.totp !== undefined,
+          codeStep: ticket.codeStep,
         },
         ticket.codeNonce,
       );
@@ -196,16 +202,22 @@ export class BridgeServer {
       // profile's site, while the run is still going.
       if (!allowed) return send(403, mismatch);
       if (profile.totp === undefined || ticket.codeNonce === null) return send(404, { status: 'no_totp', hint: `Profile "${profile.name}" has no TOTP secret.` });
-      let nonce: unknown = null;
+      type CodeRequest = { nonce?: unknown; codeOnly?: unknown } | null;
+      let body: CodeRequest = null;
       try {
-        nonce = (JSON.parse(await readBody(req)) as { nonce?: unknown } | null)?.nonce;
+        body = JSON.parse(await readBody(req)) as CodeRequest;
       } catch {
         // no or malformed body: refused below
       }
+      const nonce = body?.nonce;
       if (typeof nonce !== 'string' || !sameSecret(nonce, ticket.codeNonce)) {
         return send(403, { status: 'refused', hint: 'Only the login script of this ticket can ask for its one-time code.' });
       }
       if (ticket.result !== null) return send(410, { status: 'finished', hint: 'This login already reported its outcome; call login again.' });
+      // A page that asks only for the code gets one only right after this profile's password step (#1 review).
+      if (body?.codeOnly === true && ticket.codeStep !== 'after_password') {
+        return send(409, { status: 'refused', hint: 'There is no login of this profile in progress that waits for a code on a page of its own.' });
+      }
       if (ticket.codeReleased) return send(409, { status: 'already_used', hint: 'This login already got its one-time code.' });
       ticket.codeReleased = true;
       return send(200, { code: await freshTotpCode(profile.totp, { now: this.now, sleep: this.sleep }) });

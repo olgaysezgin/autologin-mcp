@@ -61,11 +61,11 @@ The page wants something only a person can do, and autologin-mcp stopped without
 - `mfa_required`: the password was accepted and the page asks for a one-time code. If the code comes from an authenticator app, give the profile its TOTP secret (`npx autologin-mcp add <name> --totp`, see [Configuration](configuration.md#authenticator-codes-totp)) and autologin-mcp fills it. Codes sent by SMS or email stay with you.
 - `password_step_timeout`, `left_profile_site`: see the identifier-first section above.
 
-### `failed` with `reason: totp_rejected`
+Single sign-on, passkey and captcha pages are classified only after the usual detect time (5 seconds), so a login form that renders late is still filled; a code page right after the password step needs no wait. In bridge mode the credentials are not even requested for these pages.
 
-The page did not accept the one-time code made from the profile's TOTP secret. Check that the secret belongs to this account (re-add it from the authenticator setup, or its `otpauth://` URI), and that the computer's clock is set automatically: a clock that is off by more than about 30 seconds makes every code wrong. Like a wrong password, it counts toward the rate limit.
+## `failed` with `reason: totp_rejected`
 
-Pages are classified only after the usual detect time (5 seconds), so a login form that renders late is still filled. In bridge mode the credentials are not even requested for these pages.
+The page did not accept the one-time code made from the profile's TOTP secret. Check that the secret belongs to this account (re-add it from the authenticator setup, or its `otpauth://` URI), and that the computer's clock is set automatically: a clock that is off by more than about 30 seconds makes every code wrong. Like a wrong password, it counts toward the rate limit. One code is sent per password step: in bridge mode, when the app shows its code page again after `submitted` with `reason: code_submitted`, the next `login` call reports `totp_rejected` and sends no new code.
 
 ## `failed` although the credentials are right
 

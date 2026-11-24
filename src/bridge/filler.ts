@@ -1,4 +1,4 @@
-import type { NoFormContext } from '../results.js';
+import type { CodeStep, NoFormContext } from '../results.js';
 import { autologinInpage, type CodeResult, type DetectResult, type InpageSelectors, type StateResult, type SubmitResult } from '../inpage.js';
 
 export interface BridgeCredentials {
@@ -7,7 +7,9 @@ export interface BridgeCredentials {
   selectors: InpageSelectors;
   successSelector?: string;
   /** A TOTP profile: the current one-time code, asked for only when the page shows the code step (#1). */
-  code?: () => Promise<string>;
+  code?: (codeOnly: boolean) => Promise<string>;
+  /** Whether a page that asks only for a one-time code is a step of a login in progress (ResultLog.codeStep). */
+  codeStep?: CodeStep;
 }
 
 /**
@@ -19,7 +21,8 @@ export interface LazyBridgeCredentials {
   selectors: InpageSelectors;
   successSelector?: string;
   load(): Promise<{ username: string; password: string }>;
-  code?: () => Promise<string>;
+  code?: (codeOnly: boolean) => Promise<string>;
+  codeStep?: CodeStep;
 }
 
 export interface BridgeTiming {
@@ -62,9 +65,12 @@ export async function bridgeLogin(
     captcha: 'This page shows a captcha. A human has to solve it; autologin-mcp does not.',
     mfa_required: 'The page now asks for a one-time code (a second factor) after the password, so a human has to enter it.',
   };
-  // Same words as TOTP_REJECTED_HINT in src/login/engine.ts.
+  // Same words as TOTP_REJECTED_HINT and CODE_AGAIN_HINT in src/login/engine.ts.
   const TOTP_REJECTED_HINT =
     "The page did not accept the one-time code made from the profile's TOTP secret. Check the secret, and that this computer's clock is right.";
+  const CODE_AGAIN_HINT =
+    "The page asks for the one-time code again after the last code was submitted, so that code was not accepted. Check the profile's TOTP secret, and that this computer's clock is right. No new code was sent.";
+  const codeStep = creds.codeStep ?? null;
   // The URL is scrubbed too: a GET form puts the one-time code there.
   const finish = (status: BridgeStatus, extra: { reason?: string; hint?: string } = {}): BridgeResult => ({ status, url: scrub(location.href), ...extra });
   const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -92,8 +98,8 @@ export async function bridgeLogin(
    * code step), typed like the password. The page may re-render while the code is on its way, so the field is
    * tagged once the code is here.
    */
-  const sendCode = async (loadCode: () => Promise<string>): Promise<BridgeResult | null> => {
-    const code = await loadCode();
+  const sendCode = async (loadCode: (codeOnly: boolean) => Promise<string>, codeOnly: boolean): Promise<BridgeResult | null> => {
+    const code = await loadCode(codeOnly);
     if (!(inpage('code', {}) as CodeResult).found) return mfaRequired();
     sentCode = code;
     fill('code', code);
@@ -117,8 +123,9 @@ export async function bridgeLogin(
     let identifierSince: number | null = null;
     let detected = inpage('detect', { selectors: creds.selectors }) as DetectResult;
     for (;;) {
-      // A code page (the app navigated after the password) needs no waiting.
-      if (detected.found || detected.error || detected.step === 'code') break;
+      // A code page during a login (the app navigated after the password) needs no waiting; outside a login it is
+      // not a login page at all, as before TOTP support.
+      if (detected.found || detected.error || (detected.step === 'code' && codeStep !== null)) break;
       const now = Date.now();
       if (detected.step === 'identifier') {
         identifierSince ??= now;
@@ -130,7 +137,8 @@ export async function bridgeLogin(
       await sleep(timing.pollMs);
       detected = inpage('detect', { selectors: creds.selectors }) as DetectResult;
     }
-    const codePage = detected.step === 'code';
+    const codePage = detected.step === 'code' && codeStep !== null;
+    if (codePage && codeStep === 'after_code') return finish('failed', { reason: 'totp_rejected', hint: CODE_AGAIN_HINT });
     if (codePage && creds.code === undefined) return mfaRequired();
     if (!detected.found && !codePage) {
       if (detected.step !== 'identifier' || !detected.hasUsername) {
@@ -185,7 +193,7 @@ export async function bridgeLogin(
     if (codePage) {
       // Only the code is asked for here: the password went in on the page before, so the credentials are not.
       window.addEventListener('beforeunload', onLeave, { once: true });
-      const stopped = await sendCode(creds.code!);
+      const stopped = await sendCode(creds.code!, true);
       if (stopped !== null) return stopped;
     } else {
       const { username, password } = await credentials();
@@ -215,6 +223,12 @@ export async function bridgeLogin(
         };
       });
       if (leaving) {
+        if (sentCode !== null) {
+          return finish('submitted', {
+            reason: 'code_submitted',
+            hint: 'The page navigated after the one-time code was submitted; check that the app now shows you as logged in. If it asks for the code again, call login again: it reports the rejected code and sends no new one.',
+          });
+        }
         return finish('submitted', { hint: 'The page navigated after the login form was submitted; check that the app now shows you as logged in. If it asks for a one-time code, call login again.' });
       }
       const current = inpage('state', { successSelector: creds.successSelector }) as StateResult;
@@ -224,7 +238,7 @@ export async function bridgeLogin(
         goneStreak = 0;
         if (creds.code === undefined) return mfaRequired();
         if (sentCode === null) {
-          const stopped = await sendCode(creds.code);
+          const stopped = await sendCode(creds.code, false);
           if (stopped !== null) return stopped;
           stepStart = Date.now();
           stepBefore = current;
@@ -273,7 +287,7 @@ export function fillerScript(
   token: string,
   timing: BridgeTiming,
   noForm: NoFormContext | null = null,
-  hints: { selectors: InpageSelectors; successSelector?: string; totp?: boolean } = { selectors: {} },
+  hints: { selectors: InpageSelectors; successSelector?: string; totp?: boolean; codeStep?: CodeStep } = { selectors: {} },
   codeNonce: string | null = null,
 ): string {
   return [
@@ -296,7 +310,7 @@ export function fillerScript(
     '});',
     // A TOTP profile's current code, fetched only when the page shows the code step (the secret stays on the machine).
     `const codeNonce = ${JSON.stringify(codeNonce)};`,
-    "const loadCode = () => fetch(base + '/v1/code/' + token, { method: 'POST', body: JSON.stringify({ nonce: codeNonce }) }).then(async (res) => {",
+    "const loadCode = (codeOnly) => fetch(base + '/v1/code/' + token, { method: 'POST', body: JSON.stringify({ nonce: codeNonce, codeOnly: codeOnly === true }) }).then(async (res) => {",
     '  const body = await res.json();',
     '  if (res.ok) return body.code;',
     "  throw new Error(body.hint || body.status || 'one-time code refused');",

@@ -12,6 +12,7 @@ import { selectTarget } from '../../src/browser/tabs.ts';
 import { performLogin, type LoginResult, type LoginTiming } from '../../src/login/engine.ts';
 import { createDefaultDeps } from '../../src/serve.ts';
 import { createServer } from '../../src/server.ts';
+import { ResultLog } from '../../src/results.ts';
 import { buildStore, isUsable, type UsableProfile } from '../../src/store/profiles.ts';
 import { launchChrome, type TestChrome } from '../helpers/chrome.ts';
 import { startFixtureServer, VALID, type FixtureServer } from '../helpers/fixture-server.ts';
@@ -124,9 +125,11 @@ describe('login engine in a real Chrome (auto-connect via DevToolsActivePort)', 
     expect(result).toMatchObject({ status: 'success', profile: 'app' });
     expect(tab.url()).toMatch(/\/dashboard\.html$/);
     expect(app.codes.at(-1)).toMatch(/^\d{6}$/);
-    // Without a TOTP secret, the code page goes to a person.
-    const { result: noSecret } = await loginOn('totp-code.html', profile(), { ...FAST, detectTimeoutMs: 800 });
-    expect(noSecret).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
+    // Outside a login a code page is not a login page: nothing is typed (#1 review 2).
+    const before = app.codes.length;
+    const { result: outside } = await loginOn('totp-code.html', profile({ APP_TOTP_SECRET: TOTP_SECRET }), { ...FAST, detectTimeoutMs: 800 });
+    expect(outside).toMatchObject({ status: 'no_login_form' });
+    expect(app.codes.length).toBe(before);
   });
 
   it('types nothing on another site when the username step leads there', async () => {
@@ -297,20 +300,53 @@ describe('bridge mode in a real Chrome (autologin-mcp has no CDP access)', () =>
     await vi.waitFor(() => expect(reports.at(-1)![1]).toMatchObject({ status: 'failed', reason: 'totp_rejected' }));
   });
 
-  it('fills the code page of a server-rendered app on the next login call, without the credentials (#1 review)', async () => {
-    const p = profile({ APP_TOTP_SECRET: TOTP_SECRET });
-    const { tab, result } = await bridgeOn('totp-classic.html', p);
-    expect(result.status).toBe('submitted');
-    await tab.waitForFunction(() => location.pathname === '/totp-code.html');
-    const asked: string[] = [];
-    tab.on('request', (request) => {
-      if (request.url().includes('/v1/')) asked.push(new URL(request.url()).pathname.split('/')[2]!);
+  describe('a server-rendered app with a code page of its own (#1 review)', () => {
+    /** A bridge wired like serve.ts: outcomes go to a ResultLog that tells the next run whether a code page is a login step. */
+    let log: ResultLog;
+    let wired: BridgeServer;
+    beforeAll(() => {
+      log = new ResultLog();
+      wired = new BridgeServer({ timing: FAST, onResult: (name, result) => log.record(name, result, 'bridge'), codeStepContext: (name) => log.codeStep(name) });
     });
-    const fn = (await bridge.issue(p)).function;
-    expect(await tab.evaluate(`(${fn})()`)).toMatchObject({ status: 'submitted' });
-    await tab.waitForFunction(() => location.pathname === '/dashboard.html');
-    expect(asked).toEqual(['filler', 'code', 'result']);
-    expect(app.codes.at(-1)).toMatch(/^\d{6}$/);
+    afterAll(async () => {
+      await wired.close();
+    });
+    async function runOn(tab: Page, p: UsableProfile) {
+      const asked: string[] = [];
+      const listen = (request: { url(): string }) => {
+        if (request.url().includes('/v1/')) asked.push(new URL(request.url()).pathname.split('/')[2]!);
+      };
+      tab.on('request', listen);
+      const result = (await tab.evaluate(`(${(await wired.issue(p)).function})()`)) as BridgeResult;
+      await vi.waitFor(() => expect(asked).toContain('result'));
+      tab.off('request', listen);
+      return { result, asked };
+    }
+
+    it('fills the code page on the next login call, without the credentials', async () => {
+      const p = profile({ APP_TOTP_SECRET: TOTP_SECRET });
+      const tab = await open('totp-classic.html');
+      expect((await runOn(tab, p)).result.status).toBe('submitted');
+      await tab.waitForFunction(() => location.pathname === '/totp-code.html');
+      const second = await runOn(tab, p);
+      expect(second.result).toMatchObject({ status: 'submitted', reason: 'code_submitted' });
+      expect(second.asked).toEqual(['filler', 'code', 'result']);
+      await tab.waitForFunction(() => location.pathname === '/dashboard.html');
+    });
+
+    it('sends one code only with a wrong secret: the next call reports the rejection and counts it (#1 review 2)', async () => {
+      const p = profile({ APP_TOTP_SECRET: 'JBSWY3DPEHPK3PXP' });
+      const tab = await open('totp-classic.html');
+      await runOn(tab, p);
+      await tab.waitForFunction(() => location.pathname === '/totp-code.html');
+      const before = app.codes.length;
+      expect((await runOn(tab, p)).result).toMatchObject({ status: 'submitted', reason: 'code_submitted' });
+      await tab.waitForFunction(() => document.querySelector('[role="alert"]') !== null);
+      const third = await runOn(tab, p);
+      expect(third.result).toMatchObject({ status: 'failed', reason: 'totp_rejected', hint: expect.stringContaining('No new code was sent') });
+      expect(third.asked).toEqual(['filler', 'result']);
+      expect(app.codes.length).toBe(before + 1);
+    });
   });
 
   it('runs a script once: after a run that found no form, a re-run types nothing (#2 review)', async () => {

@@ -6,7 +6,7 @@ import type { BridgeTicket } from './bridge/server.js';
 import type { LoginResult, PageLike } from './login/engine.js';
 import type { FailureLimiter } from './ratelimit.js';
 import { createRedactor } from './redact.js';
-import type { ResultLog } from './results.js';
+import type { CodeStep, ResultLog } from './results.js';
 import type { LoadedStore } from './store/envfile.js';
 import { hostOf, matchesUrl } from './store/match.js';
 import { isUsable, type UsableProfile } from './store/profiles.js';
@@ -42,7 +42,8 @@ export interface ServerDeps {
   configFile: string;
   loadStore(): Promise<LoadedStore>;
   getBrowser(): Promise<BrowserLike>;
-  login(page: PageLike, profile: UsableProfile): Promise<LoginResult>;
+  /** `codeStep`: whether a page that asks only for a one-time code is a step of a login in progress. */
+  login(page: PageLike, profile: UsableProfile, codeStep: CodeStep): Promise<LoginResult>;
   bridge: BridgeLike;
   /** Creates the credentials file if needed and opens it in the user's editor. */
   openConfig(): Promise<{ created: boolean }>;
@@ -83,7 +84,7 @@ async function loginViaCdp(deps: ServerDeps, usable: UsableProfile[], args: Logi
   if (!selection.ok) return selection.result;
   const { page, profile } = selection;
   if (deps.limiter.isBlocked(profile.name)) return rateLimited(profile.name);
-  const result = await deps.login(page, profile);
+  const result = await deps.login(page, profile, deps.results.codeStep(profile.name));
   if (result.status === 'failed' || result.status === 'error') deps.limiter.recordFailure(profile.name);
   const logged = deps.results.record(profile.name, result, 'cdp');
   return logged.previous_login === undefined ? result : { ...result, hint: logged.hint, previous_login: logged.previous_login };

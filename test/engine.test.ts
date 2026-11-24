@@ -488,14 +488,14 @@ describe('TOTP codes: review fixes (#1 review)', () => {
   it('fills only the code on a code page of its own, typing no password', async () => {
     const page = new RecordingPage([CODE_PAGE], [codeStep(), gone, gone]);
     const clock = fakeClock();
-    expect(await performLogin(page, totpProfile, timing, clock)).toEqual({ status: 'success', profile: 'app', url: 'https://app.test/login' });
+    expect(await performLogin(page, totpProfile, timing, clock, 'after_password')).toEqual({ status: 'success', profile: 'app', url: 'https://app.test/login' });
     expect(page.typed).toEqual([totpCode(totpProfile.totp!, 0)]);
   });
 
   it('hands a code page to a person at once when the profile has no TOTP secret', async () => {
     const page = new RecordingPage([CODE_PAGE], [codeStep()]);
     const clock = fakeClock();
-    expect(await performLogin(page, profile, timing, clock)).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
+    expect(await performLogin(page, profile, timing, clock, 'after_password')).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
     expect(clock.t).toBe(0);
     expect(page.typed).toEqual([]);
   });
@@ -506,7 +506,7 @@ describe('TOTP codes: review fixes (#1 review)', () => {
       if (action === 'code') return { found: false, hasSubmit: false };
       return FakePage.prototype.run.call(page, action);
     }) as typeof page.run;
-    expect(await performLogin(page, totpProfile, timing, fakeClock())).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
+    expect(await performLogin(page, totpProfile, timing, fakeClock(), 'after_password')).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
     expect(page.typed).toEqual([]);
   });
 
@@ -527,5 +527,46 @@ describe('TOTP codes: review fixes (#1 review)', () => {
     const afterCode = page.calls.slice(page.calls.indexOf('focus:code'));
     expect(afterCode).toContain('clear:password');
     expect(afterCode).toContain('clear:code');
+  });
+});
+
+describe('TOTP codes: only within a login (#1 review 2)', () => {
+  const totpProfile = buildStore({ APP_URL: 'app.test', APP_USERNAME: 'qa', APP_PASSWORD: 'pw', APP_TOTP_SECRET: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ' })
+    .profiles[0] as UsableProfile;
+  const codeStep: StateResult = { ready: true, passwordVisible: false, success: false, errorText: null, codeVisible: true };
+  const CODE_PAGE: DetectResult = { found: false, hasUsername: false, hasSubmit: false, step: 'code' };
+
+  it('leaves a code page alone when no login is in progress, as before TOTP support', async () => {
+    const page = new FakePage([CODE_PAGE], [codeStep]);
+    const clock = fakeClock();
+    expect(await performLogin(page, totpProfile, timing, clock)).toMatchObject({ status: 'no_login_form', hint: 'No visible password field was found on the page.' });
+    expect(clock.t).toBe(timing.detectTimeoutMs);
+    expect(page.typed).toEqual([]);
+    expect(page.calls).not.toContain('code');
+    const withSelector = new FakePage([{ ...CODE_PAGE, error: 'The password selector did not match a visible field.' }], [codeStep]);
+    expect(await performLogin(withSelector, totpProfile, timing, fakeClock())).toMatchObject({ status: 'no_login_form', hint: expect.stringContaining('password selector') });
+  });
+
+  it('reports a code page that comes back after a submitted code as a rejected code, sending no new one', async () => {
+    const page = new FakePage([CODE_PAGE], [codeStep]);
+    const clock = fakeClock();
+    expect(await performLogin(page, totpProfile, timing, clock, 'after_code')).toEqual({
+      status: 'failed',
+      profile: 'app',
+      url: 'https://app.test/login',
+      reason: 'totp_rejected',
+      hint: expect.stringContaining('No new code was sent'),
+    });
+    expect(clock.t).toBe(0);
+    expect(page.typed).toEqual([]);
+  });
+
+  it('fills the code page of a profile with a password selector during a login', async () => {
+    const page = new FakePage([{ ...CODE_PAGE, error: 'The password selector did not match a visible field.' }], [codeStep, gone, gone]);
+    page.elements.add('code');
+    const original = page.run.bind(page);
+    page.run = (async <T,>(action: InpageAction) => (action === 'code' ? ({ found: true, hasSubmit: true } as T) : original<T>(action))) as typeof page.run;
+    expect((await performLogin(page, totpProfile, timing, fakeClock(), 'after_password')).status).toBe('success');
+    expect(page.typed).toHaveLength(1);
   });
 });

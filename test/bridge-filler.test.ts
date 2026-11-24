@@ -498,9 +498,11 @@ describe('TOTP codes: review fixes (#1 review)', () => {
       document.querySelector('#f')!.remove();
     });
     const load = vi.fn(async () => ({ username: 'u', password: 'p' }));
-    expect(await bridgeLogin(autologinInpage, { selectors: {}, load, code: async () => '654321' }, TIMING)).toEqual({ status: 'success', url: location.href });
+    const code = vi.fn(async () => '654321');
+    expect(await bridgeLogin(autologinInpage, { selectors: {}, load, code, codeStep: 'after_password' }, TIMING)).toEqual({ status: 'success', url: location.href });
     expect(typed).toBe('654321');
     expect(load).not.toHaveBeenCalled();
+    expect(code).toHaveBeenCalledWith(true);
   });
 
   it('hands a code page to a person when its code field goes away while the code is on its way', async () => {
@@ -509,13 +511,13 @@ describe('TOTP codes: review fixes (#1 review)', () => {
       document.body.innerHTML = '<p>Choose another way to sign in</p>';
       return '123456';
     };
-    expect(await bridgeLogin(autologinInpage, { selectors: {}, load: vi.fn(), code: gone }, TIMING)).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
+    expect(await bridgeLogin(autologinInpage, { selectors: {}, load: vi.fn(), code: gone, codeStep: 'after_password' }, TIMING)).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
   });
 
   it('hands a code page to a person at once without a TOTP secret', async () => {
     document.body.innerHTML = `<input name="otp"><button>Verify</button>`;
     const startedAt = Date.now();
-    expect(await bridgeLogin(autologinInpage, CREDS, { ...TIMING, detectTimeoutMs: 2_000 })).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, codeStep: 'after_password' }, { ...TIMING, detectTimeoutMs: 2_000 })).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
     expect(Date.now() - startedAt).toBeLessThan(1_000);
   });
 
@@ -543,5 +545,38 @@ describe('TOTP codes: review fixes (#1 review)', () => {
     expect(await bridgeLogin(autologinInpage, { ...CREDS, code: async () => '123456' }, TIMING)).toMatchObject({ status: 'failed', reason: 'totp_rejected', hint: 'Wrong code' });
     expect(document.querySelector<HTMLInputElement>('#pass')!.value).toBe('');
     expect(document.querySelector<HTMLInputElement>('#otp')!.value).toBe('');
+  });
+});
+
+describe('TOTP codes: only within a login (#1 review 2)', () => {
+  const codePage = () => (document.body.innerHTML = `<form id="f"><input name="otp" autocomplete="one-time-code"><button type="submit">Verify</button></form>`);
+
+  it('leaves a code page alone when no login is in progress, as before TOTP support', async () => {
+    codePage();
+    const code = vi.fn(async () => '123456');
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code }, TIMING)).toMatchObject({ status: 'no_login_form' });
+    expect(code).not.toHaveBeenCalled();
+  });
+
+  it('reports a code page after a submitted code as a rejected code, asking for no new one', async () => {
+    codePage();
+    const code = vi.fn(async () => '123456');
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code, codeStep: 'after_code' }, TIMING)).toEqual({
+      status: 'failed',
+      url: location.href,
+      reason: 'totp_rejected',
+      hint: expect.stringContaining('No new code was sent'),
+    });
+    expect(code).not.toHaveBeenCalled();
+  });
+
+  it('marks a page that navigates after the code was submitted, so the next call can tell a rejected code', async () => {
+    app(() => {
+      document.querySelector('#login')!.innerHTML = `<input id="otp" name="otp"><button id="verify">Verify</button>`;
+      document.querySelector('#verify')!.addEventListener('click', () => window.dispatchEvent(new Event('beforeunload')));
+    });
+    const code = vi.fn(async () => '123456');
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code }, TIMING)).toMatchObject({ status: 'submitted', reason: 'code_submitted', hint: expect.stringContaining('call login again') });
+    expect(code).toHaveBeenCalledWith(false);
   });
 });

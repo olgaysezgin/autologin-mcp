@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { alreadyLoggedInHint, RECENT_MS, ResultLog, USERNAME_STEP_NAVIGATED } from '../src/results.ts';
+import { CODE_STEP_MS, CODE_SUBMITTED } from '../src/results.ts';
 
 describe('ResultLog', () => {
   it('keeps the latest result per profile', () => {
@@ -75,5 +76,32 @@ describe('ResultLog no_login_form context', () => {
     expect(log.noFormContext('app')).toBeNull();
     expect(log.record('app', { status: 'no_login_form', hint: 'No form' }, 'bridge')).toMatchObject({ hint: 'No form' });
     expect(log.get('app')[0]).not.toHaveProperty('previous_login');
+  });
+});
+
+describe('ResultLog code steps (#1 review)', () => {
+  it('expects a code page only right after a password step that navigated', () => {
+    let now = Date.UTC(2026, 10, 24, 12, 0, 0);
+    const log = new ResultLog(() => now);
+    expect(log.codeStep('app')).toBeNull();
+    log.record('app', { status: 'submitted' }, 'bridge');
+    expect(log.codeStep('app')).toBe('after_password');
+    now += CODE_STEP_MS + 1;
+    expect(log.codeStep('app')).toBeNull();
+  });
+
+  it('takes a code page after a code that navigated for a rejected code', () => {
+    const now = Date.UTC(2026, 10, 24, 12, 0, 0);
+    const log = new ResultLog(() => now);
+    log.record('app', { status: 'submitted', reason: CODE_SUBMITTED }, 'bridge');
+    expect(log.codeStep('app')).toBe('after_code');
+  });
+
+  it('expects no code page after anything else: a logged-in page with a code field is left alone', () => {
+    const log = new ResultLog(() => Date.UTC(2026, 10, 24, 12, 0, 0));
+    for (const result of [{ status: 'success' }, { status: 'failed', reason: 'totp_rejected' }, { status: 'submitted', reason: USERNAME_STEP_NAVIGATED }, { status: 'needs_human', reason: 'mfa_required' }]) {
+      log.record('app', result, 'bridge');
+      expect(log.codeStep('app')).toBeNull();
+    }
   });
 });

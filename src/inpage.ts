@@ -208,11 +208,34 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
     hasSubmit: false,
     error: `The ${field} selector did not match a visible field.`,
   });
+  // Controls a person types into or picks from. Hidden fields, checkboxes and buttons do not count.
+  const NOT_TYPED = ['hidden', 'checkbox', 'radio', 'submit', 'button', 'image', 'reset'];
+  const typedControls = (controls: Element[]): number =>
+    controls.filter(
+      (el) =>
+        (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) &&
+        visible(el) &&
+        !el.disabled &&
+        !(el instanceof HTMLInputElement && NOT_TYPED.includes(el.type)),
+    ).length;
+  // A page that asks only for a one-time code: the code is the one field to type in its form, or in its small
+  // container. An email + code form (a passwordless login) is not one. Whether it is a step of a login at all is
+  // for the caller to know (#1).
+  const codePage = (): boolean => {
+    const field = Array.from(document.querySelectorAll('input')).find(codeField);
+    if (field === undefined) return false;
+    if (field.form !== null) return typedControls(Array.from(field.form.elements)) === 1;
+    let node = field.parentElement;
+    for (let depth = 0; depth < 2 && node !== null && node !== document.documentElement; depth += 1, node = node.parentElement) {
+      if (typedControls(Array.from(node.querySelectorAll('input, textarea, select'))) !== 1) return false;
+    }
+    return true;
+  };
 
   let password: HTMLInputElement;
   if (selectors.password) {
     const el = find(selectors.password);
-    if (!usable(el)) return notFound('password');
+    if (!usable(el)) return codePage() ? { ...notFound('password'), step: 'code' } : notFound('password');
     password = el;
   } else {
     const el = Array.from(document.querySelectorAll('input[type="password"]')).find(usable);
@@ -225,16 +248,6 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
       const loginField = (el: HTMLInputElement): boolean =>
         (el.getAttribute('autocomplete') ?? '').toLowerCase().split(/\s+/).includes('username') ||
         [el.name, el.id].some((word) => LOGIN_FIELD.test(word));
-      // Controls a person types into or picks from. Hidden fields, checkboxes and buttons do not count.
-      const NOT_TYPED = ['hidden', 'checkbox', 'radio', 'submit', 'button', 'image', 'reset'];
-      const typedControls = (controls: Element[]): number =>
-        controls.filter(
-          (el) =>
-            (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) &&
-            visible(el) &&
-            !el.disabled &&
-            !(el instanceof HTMLInputElement && NOT_TYPED.includes(el.type)),
-        ).length;
       const BUTTONS = 'button, [role="button"], input[type="button"], input[type="submit"]';
       // A button after the field that means "continue", and not, say, "Subscribe" or "Invite".
       const continueButton = (buttons: Element[], field: HTMLInputElement): Element | null =>
@@ -270,9 +283,6 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
         button.setAttribute(ATTR, 'submit');
         return { found: false, hasUsername: true, hasSubmit: true, step: 'identifier', nextButton: NEXT_TEXT.test(label(button)) };
       }
-      // The code page of a login whose second step is a page of its own: the caller fills the code (with a TOTP
-      // secret) or hands it to a person.
-      if (Array.from(document.querySelectorAll('input')).some(codeField)) return { found: false, hasUsername: false, hasSubmit: false, step: 'code' };
       // No form to fill. Does the page want something only a person can do? Only checked here, without a
       // password field or a username step: SSO buttons, passkeys and invisible captchas sit on many normal
       // login pages and block nothing there.
@@ -298,7 +308,8 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
             : actions.some((t) => PASSKEY_TEXT.test(t))
               ? 'passkey'
               : null;
-      return blocker === null ? { found: false, hasUsername: false, hasSubmit: false } : { found: false, hasUsername: false, hasSubmit: false, blocker };
+      if (blocker !== null) return { found: false, hasUsername: false, hasSubmit: false, blocker };
+      return codePage() ? { found: false, hasUsername: false, hasSubmit: false, step: 'code' } : { found: false, hasUsername: false, hasSubmit: false };
     }
     password = el as HTMLInputElement;
   }

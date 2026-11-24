@@ -4,7 +4,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { BridgeServer, type BridgeOptions } from './bridge/server.js';
 import { BrowserManager, chromeUserDataDirs, type BrowserManagerOptions } from './browser/connect.js';
-import { performLogin } from './login/engine.js';
+import { DEFAULT_TIMING, performLogin, realClock } from './login/engine.js';
 import { openDetached, type SpawnFn } from './opener.js';
 import { credentialsPath, resolveConfigDir, type Env } from './paths.js';
 import { FailureLimiter } from './ratelimit.js';
@@ -22,7 +22,7 @@ export interface ServeOptions {
   input?: EventEmitter;
   connect?: BrowserManagerOptions['connect'];
   spawn?: SpawnFn;
-  bridge?: Omit<BridgeOptions, 'onResult' | 'noFormContext'>;
+  bridge?: Omit<BridgeOptions, 'onResult' | 'noFormContext' | 'codeStepContext'>;
 }
 
 export function createDefaultDeps(options: ServeOptions = {}): { deps: ServerDeps; browser: BrowserManager; bridge: BridgeServer } {
@@ -44,13 +44,14 @@ export function createDefaultDeps(options: ServeOptions = {}): { deps: ServerDep
       results.record(profile, result, 'bridge');
     },
     noFormContext: (profile) => results.noFormContext(profile),
+    codeStepContext: (profile) => results.codeStep(profile),
   });
   const deps: ServerDeps = {
     version: VERSION,
     configFile: file,
     loadStore: () => loadStore(file),
     getBrowser: () => browser.get(),
-    login: (page, profile) => performLogin(page, profile),
+    login: (page, profile, codeStep) => performLogin(page, profile, DEFAULT_TIMING, realClock, codeStep),
     bridge,
     openConfig: async () => {
       const created = await ensureEnvFile(file);
