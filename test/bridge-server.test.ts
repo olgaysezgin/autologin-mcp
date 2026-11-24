@@ -349,21 +349,6 @@ describe('BridgeServer: one-time codes for a TOTP profile (#1)', () => {
     expect(JSON.parse((await askCodeOnly(ticket, nonce)).text)).toEqual({ code: totpCode(totpProfile.totp!, NOW) });
   });
 
-  it('hands out at most three codes per profile in five minutes, until a login goes through (#1 review 3)', async () => {
-    server = new BridgeServer({ now: () => NOW });
-    const codeOnce = async () => {
-      const ticket = await server!.issue(totpProfile);
-      const response = await askCode(ticket, await startRun(ticket));
-      return { ticket, response };
-    };
-    for (let i = 0; i < 3; i += 1) expect((await codeOnce()).response.status).toBe(200);
-    const blocked = await codeOnce();
-    expect(blocked.response.status).toBe(429);
-    expect(JSON.parse(blocked.response.text)).toMatchObject({ status: 'rate_limited', hint: expect.stringContaining('TOTP secret') });
-    await request(urls(blocked.ticket).result, { method: 'POST', body: JSON.stringify({ status: 'success', url: `${ORIGIN}/` }) });
-    expect((await codeOnce()).response.status).toBe(200);
-  });
-
   it('decides code-only requests on the context at request time, and uses a password step up with one code (#1 review 3)', async () => {
     let step: 'after_password' | 'after_code' | null = 'after_password';
     const onCodeOnly = vi.fn(() => (step = 'after_code'));

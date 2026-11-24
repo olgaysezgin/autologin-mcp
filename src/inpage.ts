@@ -128,7 +128,7 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
   const CODE_BUTTONS = 'button, [role="button"], input[type="button"], input[type="submit"], input[type="image"]';
   // A code field on a page that turns something off or removes it ("Disable two-factor authentication") is a
   // logged-in settings form, not a login step: it never gets a code (#1 review).
-  const OFF_TEXT = /\b(disable|deactivate|turn off|switch off|remove|delete|revoke|reset|unlink)\b|kapat|devre d[ıi][sş][ıi]|kald[ıi]r|\bsil\b|deaktivieren|ausschalten|d[ée]sactiver|supprimer|desactivar|eliminar/i;
+  const OFF_TEXT = /\b(disable|deactivate|turn off|switch off|remove|delete|revoke|reset|unlink)\b|devre d[ıi][sş][ıi]|kald[ıi]r|\bsil\b|deaktivieren|ausschalten|d[ée]sactiver|supprimer|desactivar|eliminar/i;
   /**
    * The step a one-time-code field belongs to: the code is the one field to type in its form, or in its small
    * container, and nothing there turns something off. Returns that form or container, or null.
@@ -148,7 +148,7 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
         scopes.push(node);
       }
     }
-    const scope = scopes.at(-1)!;
+    const scope = scopes.at(-1) ?? document.body;
     return Array.from(scope.querySelectorAll(CODE_BUTTONS)).some((el) => visible(el) && OFF_TEXT.test(label(el))) ? null : scope;
   };
 

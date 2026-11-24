@@ -38,7 +38,7 @@ export const USERNAME_STEP_NAVIGATED = 'username_step_navigated';
 export const CODE_SUBMITTED = 'code_submitted';
 
 /** How long after a password step that navigated a page that asks only for a one-time code counts as its next step. */
-export const CODE_STEP_MS = 2 * 60_000;
+export const CODE_STEP_MS = 60_000;
 
 /**
  * What a page that asks only for a one-time code means for a profile (#1):

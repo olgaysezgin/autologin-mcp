@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { agentExpression, agentFunction, agentScript, bridgeLogin, fillerScript, type BridgeCredentials, type BridgeTiming } from '../src/bridge/filler.ts';
-import { PASSWORD_STEP_KEY } from '../src/bridge/filler.ts';
+import { CODE_STEP_KEY, PASSWORD_STEP_KEY } from '../src/bridge/filler.ts';
 import { autologinInpage } from '../src/inpage.ts';
 
 const TIMING: BridgeTiming = { detectTimeoutMs: 100, verifyTimeoutMs: 200, pollMs: 10, earlyFailAfterMs: 30 };
@@ -489,8 +489,25 @@ describe('TOTP codes after the password (#1)', () => {
   });
 });
 
-/** What the password step's run leaves when the page navigates: the next document, loaded right after it, may be its code page. */
-const markPasswordStep = (at = performance.timeOrigin + 200) => sessionStorage.setItem(PASSWORD_STEP_KEY, String(at));
+/**
+ * What the password step's run leaves when the page navigates: the next document, loaded right after it, may be its
+ * code page. jsdom has no navigation timing, so the page's load address is given here (the current address).
+ */
+const markPasswordStep = (at = performance.timeOrigin + 200) => {
+  sessionStorage.setItem(PASSWORD_STEP_KEY, String(at));
+  const loaded = location.href;
+  Object.defineProperty(performance, 'getEntriesByType', { configurable: true, value: (type: string) => (type === 'navigation' ? [{ name: loaded }] : []) });
+};
+/** Same, for the page right after a submitted code. */
+const markCodeStep = (at = performance.timeOrigin + 200) => {
+  sessionStorage.setItem(CODE_STEP_KEY, String(at));
+  const loaded = location.href;
+  Object.defineProperty(performance, 'getEntriesByType', { configurable: true, value: (type: string) => (type === 'navigation' ? [{ name: loaded }] : []) });
+};
+afterEach(() => {
+  delete (performance as { getEntriesByType?: unknown }).getEntriesByType;
+  sessionStorage.clear();
+});
 
 describe('TOTP codes: review fixes (#1 review)', () => {
   it('fills only the code on a code page of its own, never asking for the credentials', async () => {
@@ -566,6 +583,7 @@ describe('TOTP codes: only within a login (#1 review 2)', () => {
   });
 
   it('reports a code page after a submitted code as a rejected code, asking for no new one', async () => {
+    markCodeStep();
     codePage();
     document.body.insertAdjacentHTML('beforeend', '<p role="alert">That code is not valid</p>');
     const code = vi.fn(async () => '123456');
@@ -586,6 +604,8 @@ describe('TOTP codes: only within a login (#1 review 2)', () => {
     const code = vi.fn(async () => '123456');
     expect(await bridgeLogin(autologinInpage, { ...CREDS, code }, TIMING)).toMatchObject({ status: 'submitted', reason: 'code_submitted', hint: expect.stringContaining('call login again') });
     expect(code).toHaveBeenCalledWith(false);
+    expect(Number(sessionStorage.getItem(CODE_STEP_KEY))).toBeGreaterThan(0);
+    expect(sessionStorage.getItem(PASSWORD_STEP_KEY)).toBeNull();
   });
 });
 
@@ -621,5 +641,76 @@ describe('TOTP codes: the code page must follow the password step (#1 review 3)'
     const code = vi.fn(async () => '123456');
     expect(await bridgeLogin(autologinInpage, { ...CREDS, code, codeStep: 'after_code' }, TIMING)).toMatchObject({ status: 'no_login_form' });
     expect(code).not.toHaveBeenCalled();
+  });
+});
+
+describe('TOTP codes: no leftover marks (#1 review 4)', () => {
+  const codePage = () => (document.body.innerHTML = `<form id="f"><input name="otp" autocomplete="one-time-code"><button type="submit">Confirm</button></form>`);
+
+  it('gives no code after the app routed on without a page load', async () => {
+    const original = location.href;
+    markPasswordStep();
+    history.pushState(null, '', '/settings/delete-repository');
+    codePage();
+    const code = vi.fn(async () => '123456');
+    const result = await bridgeLogin(autologinInpage, { ...CREDS, code, codeStep: 'after_password' }, TIMING);
+    history.replaceState(null, '', original);
+    expect(result).toMatchObject({ status: 'no_login_form' });
+    expect(code).not.toHaveBeenCalled();
+  });
+
+  it('drops the mark on every run, so it cannot linger on a page without a code step', async () => {
+    markPasswordStep();
+    document.body.innerHTML = '<p>Dashboard</p>';
+    expect((await bridgeLogin(autologinInpage, CREDS, TIMING)).status).toBe('no_login_form');
+    expect(sessionStorage.getItem(PASSWORD_STEP_KEY)).toBeNull();
+  });
+
+  it('takes a login form right after a submitted code for a rejected code, typing nothing', async () => {
+    markCodeStep();
+    let typed = false;
+    app(() => (typed = true));
+    const load = vi.fn(async () => ({ username: 'u', password: 'p' }));
+    expect(await bridgeLogin(autologinInpage, { selectors: {}, load, code: vi.fn(), codeStep: 'after_code' }, TIMING)).toMatchObject({
+      status: 'failed',
+      reason: 'totp_rejected',
+      hint: expect.stringContaining('went back to its login form'),
+    });
+    expect(load).not.toHaveBeenCalled();
+    expect(typed).toBe(false);
+  });
+});
+
+describe('TOTP codes: a later login is a login (#1 review 4)', () => {
+  it('logs in normally on a login form that is not the page right after a submitted code (log out, log in again)', async () => {
+    let received: unknown = null;
+    app((state) => {
+      received = { ...state };
+      document.querySelector('#login')!.remove();
+    });
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code: vi.fn(), codeStep: 'after_code' }, TIMING)).toEqual({ status: 'success', url: location.href });
+    expect(received).toEqual({ username: CREDS.username, password: CREDS.password });
+  });
+
+  it('leaves a code page with an error alone when it is not the page right after the code', async () => {
+    document.body.innerHTML = `<form><input name="otp"><button type="submit">Verify</button></form><p role="alert">Something went wrong</p>`;
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code: vi.fn(), codeStep: 'after_code' }, TIMING)).toMatchObject({ status: 'no_login_form' });
+  });
+});
+
+describe('TOTP codes: blocked storage (#1 review 4)', () => {
+  it('fills no code page and still logs in when the page blocks sessionStorage', async () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    document.body.innerHTML = `<form><input name="otp"><button type="submit">Verify</button></form>`;
+    const code = vi.fn(async () => '123456');
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code, codeStep: 'after_password' }, TIMING)).toMatchObject({ status: 'no_login_form' });
+    expect(code).not.toHaveBeenCalled();
+    app(() => window.dispatchEvent(new Event('beforeunload')));
+    expect((await bridgeLogin(autologinInpage, CREDS, TIMING)).status).toBe('submitted');
   });
 });

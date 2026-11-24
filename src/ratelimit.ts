@@ -22,8 +22,4 @@ export class FailureLimiter {
   recordFailure(key: string): void {
     this.recent(key).push(this.now());
   }
-
-  reset(key: string): void {
-    this.failures.delete(key);
-  }
 }

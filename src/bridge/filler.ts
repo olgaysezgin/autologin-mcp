@@ -47,6 +47,9 @@ export interface BridgeResult {
  */
 export const PASSWORD_STEP_KEY = 'autologin-mcp:password-step';
 
+/** Same for a one-time code: only the document loaded right after it can tell that the code was rejected. */
+export const CODE_STEP_KEY = 'autologin-mcp:code-step';
+
 /*
  * Bridge-mode login engine. Serialized and executed inside the page, so it must stay
  * self-contained: it only uses its arguments (`inpage` is autologinInpage) and browser globals.
@@ -115,18 +118,37 @@ export async function bridgeLogin(
   let leaving = false;
   let passwordSent = false;
   let wake = (): void => undefined;
-  const STEP_KEY = 'autologin-mcp:password-step'; // PASSWORD_STEP_KEY
+  // PASSWORD_STEP_KEY and CODE_STEP_KEY: a run whose password or code made the page navigate marks the tab, and the
+  // next run reads and drops the marks, so they never linger. A mark counts only on the document loaded right after
+  // it, still at the address it loaded with: never on a page the agent opened, or routed to, later.
+  const STEP_KEY = 'autologin-mcp:password-step';
+  const CODE_KEY = 'autologin-mcp:code-step';
   const onLeave = (): void => {
     leaving = true;
-    if (passwordSent && sentCode === null) {
-      try {
-        sessionStorage.setItem(STEP_KEY, String(Date.now()));
-      } catch {
-        // storage blocked: the code page is then left to a person
-      }
+    try {
+      if (sentCode !== null) sessionStorage.setItem(CODE_KEY, String(Date.now()));
+      else if (passwordSent) sessionStorage.setItem(STEP_KEY, String(Date.now()));
+    } catch {
+      // storage blocked: the next page is then left alone
     }
     wake();
   };
+  const readMark = (key: string): number => {
+    try {
+      const at = Number(sessionStorage.getItem(key));
+      sessionStorage.removeItem(key);
+      return at;
+    } catch {
+      return Number.NaN;
+    }
+  };
+  const entries = typeof performance.getEntriesByType === 'function' ? performance.getEntriesByType('navigation') : [];
+  const loadedAt = entries.length > 0 ? entries[0]!.name : null;
+  const followed = (at: number): boolean => at > 0 && Date.now() - at < 60_000 && Math.abs(performance.timeOrigin - at) < 15_000 && loadedAt === location.href;
+  const afterPassword = followed(readMark(STEP_KEY));
+  const afterCode = followed(readMark(CODE_KEY));
+  const BACK_TO_LOGIN_HINT =
+    "The app went back to its login form after the last one-time code was submitted, so that code was not accepted. Nothing was typed; check the profile's TOTP secret and this computer's clock, then call login again.";
   const CODE_PAGE_ALONE =
     'This page asks for a one-time code, but it is not the page the last password step of this profile led to, so autologin-mcp leaves it alone.';
 
@@ -155,24 +177,19 @@ export async function bridgeLogin(
       detected = inpage('detect', { selectors: creds.selectors }) as DetectResult;
     }
     const codePage = detected.step === 'code' && codeStep !== null;
+    // The page right after a submitted code (#1 review): a login form there means the code was rejected (counted,
+    // nothing typed); so does the code page again with an error message. Without one it may be a next step (an
+    // email check): left alone. A login form on any later page is a normal login.
+    const rightAfterCode = codeStep === 'after_code' && afterCode;
+    if (rightAfterCode && (detected.found || detected.step === 'identifier')) return finish('failed', { reason: 'totp_rejected', hint: BACK_TO_LOGIN_HINT });
     if (codePage && codeStep === 'after_code') {
-      // A code went in and the page navigated: with an error message it asks again, which means the code was
-      // rejected. Without one it may be a next step (an email check, a settings page): left alone.
       const current = inpage('state', { successSelector: creds.successSelector }) as StateResult;
-      return current.errorText !== null ? finish('failed', { reason: 'totp_rejected', hint: CODE_AGAIN_HINT }) : finish('no_login_form', { hint: CODE_PAGE_ALONE });
+      return rightAfterCode && current.errorText !== null ? finish('failed', { reason: 'totp_rejected', hint: CODE_AGAIN_HINT }) : finish('no_login_form', { hint: CODE_PAGE_ALONE });
     }
     if (codePage) {
-      // The document has to be the one loaded right after this tab's password step navigated (its run left a mark),
-      // so a code field the agent finds on a page it opened later (turning two-factor off) never gets a code.
-      let marked = Number.NaN;
-      try {
-        marked = Number(sessionStorage.getItem(STEP_KEY));
-        sessionStorage.removeItem(STEP_KEY);
-      } catch {
-        // storage blocked: not marked
-      }
-      const followed = marked > 0 && Date.now() - marked < 120_000 && Math.abs(performance.timeOrigin - marked) < 15_000;
-      if (!followed) return finish('no_login_form', { hint: CODE_PAGE_ALONE });
+      // The document has to be the one loaded right after this tab's password step navigated, so a code field the
+      // agent finds later (turning two-factor off, confirming a deletion) never gets a code.
+      if (!afterPassword) return finish('no_login_form', { hint: CODE_PAGE_ALONE });
       if (creds.code === undefined) return mfaRequired();
     }
     if (!detected.found && !codePage) {

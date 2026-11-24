@@ -475,12 +475,23 @@ describe('code fields that are not a login step (#1 review 3)', () => {
       `<form><input name="otp_code" autocomplete="one-time-code"><button type="submit">Disable two-factor authentication</button></form>`,
       `<form><input name="otp"><button type="submit">Verify</button><button type="button">Turn off</button></form>`,
       `<div><input name="otp"><button>Remove device</button><button>Confirm</button></div>`,
-      `<form><input name="otp"><input type="submit" value="İki adımlı doğrulamayı kapat"></form>`,
+      `<form><input name="otp"><input type="submit" value="İki adımlı doğrulamayı devre dışı bırak"></form>`,
     ]) {
       document.body.innerHTML = markup;
       expect(code()).toEqual({ found: false, hasSubmit: false });
       expect(detect()).not.toHaveProperty('step', 'code');
     }
+  });
+
+  it('takes a Close button next to Verify for what it is, and copes with a field right under <html> (#1 review 4)', () => {
+    document.body.innerHTML = `<div role="dialog"><input name="otp"><button>Doğrula</button><button>Kapat</button></div>`;
+    expect(code()).toEqual({ found: true, hasSubmit: true });
+    document.body.innerHTML = '';
+    const stray = document.createElement('input');
+    stray.name = 'otp';
+    document.documentElement.appendChild(stray);
+    expect(() => code()).not.toThrow();
+    stray.remove();
   });
 
   it('takes a code field only when it is the one field to type in its form or container', () => {
