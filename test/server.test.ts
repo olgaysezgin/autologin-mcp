@@ -268,3 +268,37 @@ describe('MCP server', () => {
     });
   });
 });
+
+describe('MCP server: TOTP profiles (#1)', () => {
+  const TOTP = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+  const vars = { ...APP, APP_TOTP_SECRET: ` ${TOTP} ` };
+
+  it('lists which profiles have a TOTP secret, never the secret itself', async () => {
+    const c = await connect(makeDeps({ loadStore: async () => store({ ...vars, BAD_URL: 'x.test', BAD_USERNAME: 'u', BAD_PASSWORD: 'bad-password', BAD_TOTP_SECRET: 'not base32!' }) }));
+    const { body } = await call(c, 'list_profiles');
+    expect(body.profiles).toEqual([
+      { profile: 'app', url: 'app.test', username: 'qa', totp: true },
+      { profile: 'bad', url: 'x.test', username: 'u', problems: ['BAD_TOTP_SECRET: not a base32 secret or an otpauth:// URI'] },
+    ]);
+    expect(JSON.stringify(body)).not.toContain(TOTP);
+  });
+
+  it('redacts the TOTP secret from login results, outcomes and errors', async () => {
+    const results = new ResultLog(() => 0);
+    const outcomes: LoginResult[] = [{ status: 'failed', reason: 'totp_rejected', hint: `secret ${TOTP} rejected` }];
+    const uri = `otpauth://totp/App:qa?secret=${TOTP.toLowerCase()}&issuer=App`;
+    const viaUri = await connect(makeDeps({ loadStore: async () => store({ ...APP, APP_TOTP_SECRET: uri }), login: async () => ({ status: 'failed', hint: `${uri} / ${TOTP.toLowerCase()}` }) }));
+    expect((await call(viaUri, 'login')).body).toEqual({ status: 'failed', hint: '[REDACTED] / [REDACTED]' });
+    await viaUri.close();
+    const c = await connect(makeDeps({ results, loadStore: async () => store(vars), login: async () => outcomes.shift() ?? Promise.reject(new Error(`boom ${TOTP}`)) }));
+    expect((await call(c, 'login')).body).toEqual({ status: 'failed', reason: 'totp_rejected', hint: 'secret [REDACTED] rejected' });
+    expect((await call(c, 'login_status')).body).toEqual({ results: [expect.objectContaining({ hint: 'secret [REDACTED] rejected' })] });
+    expect((await call(c, 'login')).body).toEqual({ status: 'error', hint: 'boom [REDACTED]' });
+  });
+
+  it('counts a rejected code toward the rate limit, like a wrong password', async () => {
+    const c = await connect(makeDeps({ loadStore: async () => store(vars), login: async () => ({ status: 'failed', reason: 'totp_rejected' }) }));
+    for (let i = 0; i < 3; i += 1) expect((await call(c, 'login')).body).toMatchObject({ status: 'failed', reason: 'totp_rejected' });
+    expect((await call(c, 'login')).body).toMatchObject({ status: 'rate_limited' });
+  });
+});

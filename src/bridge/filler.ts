@@ -1,11 +1,13 @@
 import type { NoFormContext } from '../results.js';
-import { autologinInpage, type DetectResult, type InpageSelectors, type StateResult, type SubmitResult } from '../inpage.js';
+import { autologinInpage, type CodeResult, type DetectResult, type InpageSelectors, type StateResult, type SubmitResult } from '../inpage.js';
 
 export interface BridgeCredentials {
   username: string;
   password: string;
   selectors: InpageSelectors;
   successSelector?: string;
+  /** A TOTP profile: the current one-time code, asked for only when the page shows the code step (#1). */
+  code?: () => Promise<string>;
 }
 
 /**
@@ -17,6 +19,7 @@ export interface LazyBridgeCredentials {
   selectors: InpageSelectors;
   successSelector?: string;
   load(): Promise<{ username: string; password: string }>;
+  code?: () => Promise<string>;
 }
 
 export interface BridgeTiming {
@@ -48,7 +51,10 @@ export async function bridgeLogin(
   const ATTR = 'data-autologin-mcp';
   let secret: { username: string; password: string } | null = 'password' in creds ? { username: creds.username, password: creds.password } : null;
   const credentials = async (): Promise<{ username: string; password: string }> => (secret ??= await (creds as LazyBridgeCredentials).load());
-  const scrub = (text: string): string => (secret === null ? text : text.split(secret.password).join('[REDACTED]'));
+  // The one-time code sent for this login, if any: like the password, it never appears in a result.
+  let sentCode: string | null = null;
+  const scrub = (text: string): string =>
+    [secret?.password, sentCode].reduce<string>((acc, needle) => (needle ? acc.split(needle).join('[REDACTED]') : acc), text);
   // Same words as NEEDS_HUMAN_HINTS in src/login/engine.ts (this function runs in the page and cannot import).
   const NEEDS_HUMAN_HINTS = {
     sso: "This page signs in through single sign-on (another provider), so a human has to finish this login. autologin-mcp only fills the app's own username and password form.",
@@ -56,6 +62,9 @@ export async function bridgeLogin(
     captcha: 'This page shows a captcha. A human has to solve it; autologin-mcp does not.',
     mfa_required: 'The page now asks for a one-time code (a second factor) after the password, so a human has to enter it.',
   };
+  // Same words as TOTP_REJECTED_HINT in src/login/engine.ts.
+  const TOTP_REJECTED_HINT =
+    "The page did not accept the one-time code made from the profile's TOTP secret. Check the secret, and that this computer's clock is right.";
   const finish = (status: BridgeStatus, extra: { reason?: string; hint?: string } = {}): BridgeResult => ({ status, url: location.href, ...extra });
   const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
   let leaving = false;
@@ -161,10 +170,18 @@ export async function bridgeLogin(
       }
     }
 
-    const submittedAt = Date.now();
+    // Each step (the password, then a one-time code) gets its own wait and its own "message before".
+    let stepStart = Date.now();
+    let stepBefore = before;
     let goneStreak = 0;
     let lookedAgain = false;
     let last = before;
+    const pressEnter = (role: string): void => {
+      const field = document.querySelector(`[${ATTR}="${role}"]`)!;
+      for (const type of ['keydown', 'keypress', 'keyup']) {
+        field.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+      }
+    };
     for (;;) {
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, timing.pollMs);
@@ -179,22 +196,41 @@ export async function bridgeLogin(
       const current = inpage('state', { successSelector: creds.successSelector }) as StateResult;
       last = current;
       if (current.success) return finish('success');
-      if (current.codeVisible && !current.passwordVisible) return finish('needs_human', { reason: 'mfa_required', hint: NEEDS_HUMAN_HINTS.mfa_required });
-      if (!current.passwordVisible) {
+      if (current.codeVisible && !current.passwordVisible) {
+        goneStreak = 0;
+        if (creds.code === undefined) return finish('needs_human', { reason: 'mfa_required', hint: NEEDS_HUMAN_HINTS.mfa_required });
+        if (sentCode === null) {
+          // A second factor the profile has a TOTP secret for: one code, asked for now (the state above just saw
+          // the code field), typed like the password. The page may re-render while the code is on its way, so the
+          // field is tagged once the code is here.
+          const code = await creds.code();
+          if (!(inpage('code', {}) as CodeResult).found) return finish('needs_human', { reason: 'mfa_required', hint: NEEDS_HUMAN_HINTS.mfa_required });
+          sentCode = code;
+          fill('code', code);
+          if ((inpage('submit', {}) as SubmitResult) === 'none') pressEnter('code');
+          stepStart = Date.now();
+          stepBefore = current;
+          lookedAgain = false;
+          continue;
+        }
+        const newError = current.errorText !== null && current.errorText !== stepBefore.errorText;
+        if (newError && Date.now() - stepStart >= timing.earlyFailAfterMs) break;
+      } else if (!current.passwordVisible) {
         goneStreak += 1;
         if (goneStreak >= 2) return finish('success');
       } else {
         goneStreak = 0;
-        const newError = current.errorText !== null && current.errorText !== before.errorText;
-        if (newError && Date.now() - submittedAt >= timing.earlyFailAfterMs) break;
+        const newError = current.errorText !== null && current.errorText !== stepBefore.errorText;
+        if (newError && Date.now() - stepStart >= timing.earlyFailAfterMs) break;
       }
-      if (Date.now() - submittedAt >= timing.verifyTimeoutMs) {
+      if (Date.now() - stepStart >= timing.verifyTimeoutMs) {
         // The form was gone on the last look: look once more before calling the login failed (see engine.ts).
         if (goneStreak === 0 || lookedAgain) break;
         lookedAgain = true;
       }
     }
     inpage('clear', { role: 'password' });
+    if (sentCode !== null && last.codeVisible) return finish('failed', { reason: 'totp_rejected', hint: scrub(last.errorText ?? TOTP_REJECTED_HINT) });
     return finish('failed', {
       reason: 'still_on_login_form',
       hint: scrub(last.errorText ?? 'Still on the login form after submitting. Check the credentials, or set selectors for this profile.'),
@@ -219,7 +255,7 @@ export function fillerScript(
   token: string,
   timing: BridgeTiming,
   noForm: NoFormContext | null = null,
-  hints: { selectors: InpageSelectors; successSelector?: string } = { selectors: {} },
+  hints: { selectors: InpageSelectors; successSelector?: string; totp?: boolean } = { selectors: {} },
 ): string {
   return [
     '(() => {',
@@ -239,7 +275,14 @@ export function fillerScript(
     `  refused = body.result ? Object.assign({}, body.result, { note: ${JSON.stringify(REUSED_NOTE)} }) : body;`,
     "  throw new Error(refused.hint || refused.status || 'credentials refused');",
     '});',
-    `login(inpage, Object.assign(${JSON.stringify(hints)}, { load }), ${JSON.stringify(timing)})`,
+    // A TOTP profile's current code, fetched only when the page shows the code step (the secret stays on the machine).
+    "const loadCode = () => fetch(base + '/v1/code/' + token, { method: 'POST' }).then(async (res) => {",
+    '  const body = await res.json();',
+    '  if (res.ok) return body.code;',
+    "  throw new Error(body.hint || body.status || 'one-time code refused');",
+    '});',
+    `const hints = ${JSON.stringify(hints)};`,
+    'login(inpage, Object.assign(hints, { load }, hints.totp ? { code: loadCode } : {}), ' + `${JSON.stringify(timing)})`,
     '  .then((result) => (refused !== null ? refused : report(explain(result))))',
     "  .then(done, (error) => done({ status: 'error', url: location.href, hint: 'autologin-mcp bridge: ' + (error && error.message ? error.message : String(error)) }));",
     '})();',

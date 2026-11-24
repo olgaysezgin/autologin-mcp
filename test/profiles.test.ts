@@ -9,6 +9,7 @@ describe('splitKey', () => {
     ['APP_USERNAME_SELECTOR', 'APP', 'USERNAME_SELECTOR'],
     ['MY_USERNAME_URL', 'MY_USERNAME', 'URL'],
     ['A_PASSWORD_PASSWORD', 'A_PASSWORD', 'PASSWORD'],
+    ['STAGING_TOTP_SECRET', 'STAGING', 'TOTP_SECRET'],
   ])('%s → %s + %s', (key, prefix, suffix) => {
     expect(splitKey(key)).toEqual({ prefix, suffix });
   });
@@ -73,6 +74,35 @@ describe('buildStore', () => {
     expect(a).toMatchObject({ username: undefined, password: undefined, root: null, url: '' });
     expect(b!.problems).toEqual(['B_URL: Invalid URL "bad host!"', 'B_AUTO_LOGIN must be true or false']);
     expect(isUsable(a!)).toBe(false);
+  });
+
+  it('reads a TOTP secret, and keeps profiles without one as they were', () => {
+    const store = buildStore({
+      A_URL: 'a.test',
+      A_USERNAME: 'u',
+      A_PASSWORD: 'p',
+      A_TOTP_SECRET: ' gezd gnbv gy3t qojq gezd gnbv gy3t qojq ',
+      B_URL: 'b.test',
+      B_USERNAME: 'u',
+      B_PASSWORD: 'p',
+      B_TOTP_SECRET: '  ',
+      C_URL: 'c.test',
+      C_USERNAME: 'u',
+      C_PASSWORD: 'p',
+    });
+    const [a, b, c] = store.profiles;
+    expect(a).toMatchObject({ totpSecret: ' gezd gnbv gy3t qojq gezd gnbv gy3t qojq ', totp: { algorithm: 'SHA1', digits: 6, period: 30 }, problems: [] });
+    expect(a!.totp!.key).toEqual(Buffer.from('12345678901234567890'));
+    expect(b).not.toHaveProperty('totp');
+    expect(b).not.toHaveProperty('totpSecret');
+    expect(c).not.toHaveProperty('totp');
+    expect(isUsable(a!) && isUsable(b!) && isUsable(c!)).toBe(true);
+  });
+
+  it('reports a TOTP secret it cannot use, without repeating it', () => {
+    const [p] = buildStore({ P_URL: 'p.test', P_USERNAME: 'u', P_PASSWORD: 'p', P_TOTP_SECRET: 'not-base32!' }).profiles;
+    expect(p!.problems).toEqual(['P_TOTP_SECRET: not a base32 secret or an otpauth:// URI']);
+    expect(isUsable(p!)).toBe(false);
   });
 
   it('reads settings and warns about unknown keys', () => {

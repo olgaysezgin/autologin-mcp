@@ -1,7 +1,9 @@
-import { FIELD_ATTR, type DetectResult, type FieldRole, type InpageAction, type InpageArg, type StateResult, type SubmitResult } from '../inpage.js';
+import { FIELD_ATTR, type CodeResult, type DetectResult, type FieldRole, type InpageAction, type InpageArg, type StateResult, type SubmitResult } from '../inpage.js';
+import { REDACTED } from '../redact.js';
 import type { PreviousLogin } from '../results.js';
 import { hostOf, matchesUrl } from '../store/match.js';
 import type { UsableProfile } from '../store/profiles.js';
+import { freshTotpCode } from '../totp.js';
 
 export interface ElementLike {
   focus(): Promise<void>;
@@ -75,6 +77,10 @@ export const NEEDS_HUMAN_HINTS = {
   captcha: 'This page shows a captcha. A human has to solve it; autologin-mcp does not.',
   mfa_required: 'The page now asks for a one-time code (a second factor) after the password, so a human has to enter it.',
 } as const;
+
+/** A one-time code from the profile's TOTP secret did not get through; bridge mode carries the same words. */
+export const TOTP_REJECTED_HINT =
+  "The page did not accept the one-time code made from the profile's TOTP secret. Check the secret, and that this computer's clock is right.";
 
 export const PASSWORD_STEP_HINT =
   'The page did not ask for a password after the username step. It may use single sign-on, a passkey or a second factor, so a human has to finish this login.';
@@ -163,6 +169,9 @@ export async function performLogin(
   const detect = () => attempt(() => page.run<DetectResult>('detect', { selectors: profile.selectors }));
   const state = () => attempt(() => page.run<StateResult>('state', { successSelector: profile.selectors.success }));
   const clearPassword = () => attempt(() => page.run<boolean>('clear', { role: 'password' }));
+  // The one-time code sent for this login, if any: like the password, it never appears in a result.
+  let sentCode: string | null = null;
+  const hide = (text: string): string => (sentCode === null ? text : text.split(sentCode).join(REDACTED));
 
   try {
     const detectStart = clock.now();
@@ -224,7 +233,9 @@ export async function performLogin(
     await typeInto(page, 'password', profile.password, onSite);
     await submitForm(page, detected.hasSubmit);
 
-    const submittedAt = clock.now();
+    // Each step (the password, then a one-time code) gets its own wait and its own "message before".
+    let stepStart = clock.now();
+    let stepBefore = before;
     let goneStreak = 0;
     let lookedAgain = false;
     let last: StateResult | null = null;
@@ -235,18 +246,35 @@ export async function performLogin(
         last = current;
         if (current.success) return { status: 'success', ...base, url: page.url() };
         if (current.codeVisible && !current.passwordVisible) {
-          return { status: 'needs_human', ...base, url: page.url(), reason: 'mfa_required', hint: NEEDS_HUMAN_HINTS.mfa_required };
-        }
-        if (!current.passwordVisible) {
+          goneStreak = 0;
+          if (profile.totp === undefined) {
+            return { status: 'needs_human', ...base, url: page.url(), reason: 'mfa_required', hint: NEEDS_HUMAN_HINTS.mfa_required };
+          }
+          if (sentCode === null) {
+            // A second factor the profile has a TOTP secret for: one code, made here, typed like the password.
+            onSite();
+            const step = await attempt(() => page.run<CodeResult>('code', {}));
+            if (!step?.found) return { status: 'needs_human', ...base, url: page.url(), reason: 'mfa_required', hint: NEEDS_HUMAN_HINTS.mfa_required };
+            sentCode = await freshTotpCode(profile.totp, clock);
+            await typeInto(page, 'code', sentCode, onSite);
+            await submitForm(page, step.hasSubmit);
+            stepStart = clock.now();
+            stepBefore = current;
+            lookedAgain = false;
+            continue;
+          }
+          const newError = current.errorText !== null && current.errorText !== stepBefore?.errorText;
+          if (newError && clock.now() - stepStart >= timing.earlyFailAfterMs) break;
+        } else if (!current.passwordVisible) {
           goneStreak += 1;
           if (goneStreak >= 2) return { status: 'success', ...base, url: page.url() };
         } else {
           goneStreak = 0;
-          const newError = current.errorText !== null && current.errorText !== before?.errorText;
-          if (newError && clock.now() - submittedAt >= timing.earlyFailAfterMs) break;
+          const newError = current.errorText !== null && current.errorText !== stepBefore?.errorText;
+          if (newError && clock.now() - stepStart >= timing.earlyFailAfterMs) break;
         }
       }
-      if (clock.now() - submittedAt >= timing.verifyTimeoutMs) {
+      if (clock.now() - stepStart >= timing.verifyTimeoutMs) {
         // The password field was gone on the last look: look once more before calling the login failed,
         // so a page that was busy up to the deadline is not reported (and rate-limited) as a failure.
         if (goneStreak === 0 || lookedAgain) break;
@@ -254,16 +282,19 @@ export async function performLogin(
       }
     }
     await clearPassword();
+    if (sentCode !== null && last?.codeVisible) {
+      return { status: 'failed', ...base, url: page.url(), reason: 'totp_rejected', hint: hide(last.errorText ?? TOTP_REJECTED_HINT) };
+    }
     return {
       status: 'failed',
       ...base,
       url: page.url(),
       reason: 'still_on_login_form',
-      hint: last?.errorText ?? 'Still on the login form after submitting. Check the credentials, or set selectors for this profile.',
+      hint: hide(last?.errorText ?? 'Still on the login form after submitting. Check the credentials, or set selectors for this profile.'),
     };
   } catch (error) {
     if (error instanceof LeftSiteError) return error.result;
     await clearPassword();
-    return { status: 'error', ...base, url: page.url(), hint: error instanceof Error ? error.message : String(error) };
+    return { status: 'error', ...base, url: page.url(), hint: hide(error instanceof Error ? error.message : String(error)) };
   }
 }

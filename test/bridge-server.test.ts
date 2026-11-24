@@ -2,6 +2,7 @@ import http from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BridgeServer, type BridgeTicket } from '../src/bridge/server.ts';
 import { buildStore, type UsableProfile } from '../src/store/profiles.ts';
+import { totpCode } from '../src/totp.ts';
 
 const profile = buildStore({
   APP_URL: 'localhost:3000',
@@ -232,5 +233,74 @@ describe('BridgeServer: one run per script, even when the first run found no for
     const rerun = (await request(t.filler, { origin: ORIGIN })).text;
     expect(rerun).toContain('"status":"expired"');
     expect(rerun).not.toContain('const login = ');
+  });
+});
+
+describe('BridgeServer: one-time codes for a TOTP profile (#1)', () => {
+  const totpProfile = buildStore({
+    APP_URL: 'localhost:3000',
+    APP_USERNAME: 'qa@example.com',
+    APP_PASSWORD: 's3cret',
+    APP_TOTP_SECRET: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',
+  }).profiles[0] as UsableProfile;
+  const codeUrl = (ticket: BridgeTicket) => `${urls(ticket).base}/v1/code/${urls(ticket).token}`;
+  /** The start of a 30 s step: the current code has all its time left. */
+  const NOW = 1_700_000_010_000;
+
+  it('tells the filler whether the profile has a TOTP secret, never the secret', async () => {
+    server = new BridgeServer();
+    const filler = (await request(urls(await server.issue(totpProfile)).filler, { origin: ORIGIN })).text;
+    expect(filler).toContain('"totp":true');
+    expect(filler).toContain('/v1/code/');
+    expect(filler).not.toContain('GEZDGNBV');
+    expect((await request(urls(await server.issue(profile)).filler, { origin: ORIGIN })).text).toContain('"totp":false');
+  });
+
+  it('hands out the current code once, only to the profile origin, and only after the credentials', async () => {
+    server = new BridgeServer({ now: () => NOW });
+    const ticket = await server.issue(totpProfile);
+    const code = codeUrl(ticket);
+    expect(JSON.parse((await request(code, { method: 'POST', origin: ORIGIN })).text)).toMatchObject({ status: 'not_ready' });
+    expect((await request(urls(ticket).credentials, { method: 'POST', origin: ORIGIN })).status).toBe(200);
+    expect((await request(code, { method: 'POST', origin: 'https://evil.test' })).status).toBe(403);
+    expect((await request(code, { origin: ORIGIN })).status).toBe(405);
+    const ok = await request(code, { method: 'POST', origin: ORIGIN });
+    expect(ok.status).toBe(200);
+    expect(ok.headers['cache-control']).toBe('no-store');
+    expect(JSON.parse(ok.text)).toEqual({ code: totpCode(totpProfile.totp!, NOW) });
+    const again = await request(code, { method: 'POST', origin: ORIGIN });
+    expect(again.status).toBe(409);
+    expect(JSON.parse(again.text)).toMatchObject({ status: 'already_used' });
+  });
+
+  it('waits for the next code when the current one is about to expire', async () => {
+    let now = 1_700_000_039_000; // 1 s before the next step
+    const sleep = vi.fn(async (ms: number) => void (now += ms));
+    server = new BridgeServer({ now: () => now, sleep });
+    const ticket = await server.issue(totpProfile);
+    await request(urls(ticket).credentials, { method: 'POST', origin: ORIGIN });
+    expect(JSON.parse((await request(codeUrl(ticket), { method: 'POST', origin: ORIGIN })).text)).toEqual({ code: totpCode(totpProfile.totp!, 1_700_000_040_050) });
+    expect(sleep).toHaveBeenCalledWith(1_050);
+  });
+
+  it('waits with a real timer by default', async () => {
+    // A clock that runs in real time from 600 ms before a step boundary: the code asked for then is about to expire.
+    const boundary = 1_700_000_040_000;
+    const start = Date.now();
+    server = new BridgeServer({ now: () => boundary - 600 + (Date.now() - start) });
+    const ticket = await server.issue(totpProfile);
+    await request(urls(ticket).credentials, { method: 'POST', origin: ORIGIN });
+    const { code } = JSON.parse((await request(codeUrl(ticket), { method: 'POST', origin: ORIGIN })).text) as { code: string };
+    expect(code).toBe(totpCode(totpProfile.totp!, boundary));
+    expect(code).not.toBe(totpCode(totpProfile.totp!, boundary - 600));
+  });
+
+  it('has no code for a profile without a TOTP secret', async () => {
+    server = new BridgeServer();
+    const ticket = await server.issue(profile);
+    await request(urls(ticket).credentials, { method: 'POST', origin: ORIGIN });
+    const none = await request(codeUrl(ticket), { method: 'POST', origin: ORIGIN });
+    expect(none.status).toBe(404);
+    expect(JSON.parse(none.text)).toMatchObject({ status: 'no_totp' });
   });
 });

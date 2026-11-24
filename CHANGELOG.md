@@ -2,6 +2,13 @@
 
 Every version below is the same version in `package.json`, the git tag `v<version>`, the npm package and the GitHub release. The release workflow refuses to publish when they disagree.
 
+## 1.4.0 - 2026-11-24
+
+- Authenticator codes (TOTP, [#1](https://github.com/olgaysezgin/autologin-mcp/issues/1), proposed by mrsarac): a profile can hold the account's TOTP secret (`<PROFILE>_TOTP_SECRET`, base32 or an `otpauth://totp/...` URI with its algorithm, digits and period). When the page asks for a one-time code after the password, autologin-mcp makes the current code on this machine (RFC 6238) and fills it, in CDP and bridge mode. The secret never leaves autologin-mcp: in bridge mode the page asks for the current code once, when it shows the code step, under the same origin check as the credentials.
+- A code the page rejects returns `failed` with `reason: totp_rejected` and counts toward the rate limit. When less than 3 seconds of the current code are left, autologin-mcp waits for the next one.
+- `add --totp` asks for the TOTP secret hidden, or reads it as a second piped line with `--password-stdin`. `list` and `list_profiles` show which profiles have one; the secret and the code are redacted from every result.
+- Without a TOTP secret, the code step is handed to a person as before (`needs_human`, `reason: mfa_required`).
+
 ## 1.3.3 - 2026-11-24
 
 - A login whose form went away just as the wait for the outcome ran out (a busy page, or a slow login close to the 10-second limit) was reported as `failed` with `still_on_login_form` and counted toward the rate limit. autologin-mcp now looks once more before calling it a failure, in CDP and bridge mode; a form that is back on that look still fails.

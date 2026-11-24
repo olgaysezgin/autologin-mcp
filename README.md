@@ -71,7 +71,8 @@ Another agent? `npx autologin-mcp print-config --client codex` (or `gemini`, `cu
 - **No browser setup.** Bridge mode uses the JavaScript tool the agent already has. Turn on Chrome remote debugging and CDP mode fills the tab itself.
 - **Locked to your app's origin.** Credentials are released only to the site of the profile, so a prompt-injected page on another site gets nothing.
 - **Real-world forms.** React, Vue and Angular inputs, forms that render late, identifier-first pages that ask for the email before the password, submit buttons in many languages, and the page's own error message when a login fails.
-- **Knows when to stop.** Single sign-on, passkeys, captchas and a one-time code after the password are handed to you (`needs_human`) instead of failing or retrying, and those pages never receive the credentials.
+- **Authenticator codes (TOTP).** Give a profile its authenticator secret (`add --totp`) and the one-time code after the password is filled too. The secret stays on your machine; the page only gets the current code.
+- **Knows when to stop.** Single sign-on, passkeys, captchas and a one-time code the profile has no TOTP secret for are handed to you (`needs_human`) instead of failing or retrying, and those pages never receive the credentials.
 - **No account lockouts.** Three failed logins in five minutes pause the profile until you check the credentials.
 - **Several accounts and apps.** One global credentials file outside your projects, with as many profiles as you need.
 - **One command to install.** `npx autologin-mcp install` registers the MCP server, the skill and the guard hook in Claude Code.
@@ -110,6 +111,7 @@ LOCAL_URL=localhost:3000
 LOCAL_USERNAME=admin
 LOCAL_PASSWORD=admin
 LOCAL_SUBMIT_SELECTOR=button[type=submit]   # optional, for unusual forms
+LOCAL_TOTP_SECRET=JBSWY3DPEHPK3PXP          # optional: authenticator secret or otpauth:// URI
 ```
 
 A profile only fills pages whose host matches its root URL (`example.com`, `*.example.com`, `localhost:3000`). Several accounts for the same app are fine. More: [Configuration](docs/configuration.md).
@@ -118,7 +120,7 @@ A profile only fills pages whose host matches its root URL (`example.com`, `*.ex
 
 | Tool | What the agent gets back |
 |---|---|
-| `list_profiles` | Profile name, root URL and username for each profile. Never passwords. |
+| `list_profiles` | Profile name, root URL and username for each profile, and `totp: true` when it has a TOTP secret. Never passwords or secrets. |
 | `login({ url?, profile? })` | Bridge mode: `run_in_page` with a one-time loader to run in the tab, as `script`, `function` or `expression` for the agent's browser tool. CDP mode: the result directly (`success`, `submitted`, `failed`, `no_login_form`, `rate_limited`, …). `needs_human` with a `reason` (`sso`, `passkey`, `captcha`, `mfa_required`, …) when only a person can finish. |
 | `login_status({ profile? })` | The latest outcome per profile, for when the agent's JavaScript call was cut off. |
 | `open_config` | Opens the credentials file in your editor, or returns its path where there is no desktop. The content is never returned. |
@@ -127,7 +129,7 @@ More: [MCP tools](docs/mcp-tools.md) and [CLI reference](docs/cli.md).
 
 ### Security in one paragraph
 
-A Claude Code guard hook and deny rules block the agent from reading the credentials folder, also in skip-permissions mode. Every tool result is scrubbed of passwords. The bridge listens on `127.0.0.1` only, each script works once for 60 seconds, and credentials go only to the profile's origin, and only once the page showed a login form to fill, so a prompt-injected page on another site gets nothing. Three failed logins in five minutes pause a profile, so a wrong password cannot lock the account. autologin-mcp prevents accidental exposure, not a deliberately hostile agent: **use dedicated test accounts.** More: [Security model](docs/security.md).
+A Claude Code guard hook and deny rules block the agent from reading the credentials folder, also in skip-permissions mode. Every tool result is scrubbed of passwords. The bridge listens on `127.0.0.1` only, each script works once for 60 seconds, and credentials go only to the profile's origin, and only once the page showed a login form to fill, so a prompt-injected page on another site gets nothing. Three failed logins in five minutes pause a profile, so a wrong password cannot lock the account. A TOTP secret stays in the same file and the page only gets the current code, once per login; with both factors in one file they are one factor, which is one more reason to use test accounts. autologin-mcp prevents accidental exposure, not a deliberately hostile agent: **use dedicated test accounts.** More: [Security model](docs/security.md).
 
 ### Works with
 
@@ -153,7 +155,7 @@ No. It goes from the local credentials file straight into the page, through the 
 No. Bridge mode needs no browser setup. Remote debugging enables CDP mode, which also works when the app's Content-Security-Policy blocks the bridge.
 
 **Does it support SSO, 2FA or multi-step logins?**
-It fills username + password forms on the app's own page, including identifier-first logins that ask for the email and then swap in the password field. Single sign-on, passkeys, captchas and a one-time code after the password are recognised and handed to you (`needs_human`) instead of failing or retrying. Filling TOTP codes, logins that move to another document, and iframes are on the roadmap.
+It fills username + password forms on the app's own page, including identifier-first logins that ask for the email and then swap in the password field. With a TOTP secret in the profile, it also fills the one-time code an authenticator app would show after the password. Single sign-on, passkeys, captchas, and a one-time code the profile has no TOTP secret for are recognised and handed to you (`needs_human`) instead of failing or retrying. Logins that move to another document, and iframes, are on the roadmap.
 
 **Is it free?**
 Yes, MIT licensed.
@@ -164,7 +166,6 @@ More questions: [FAQ](docs/faq.md).
 
 - [ ] Opt-in auto-login (CDP mode): watch a profile's URL and log in without the agent asking
 - [ ] Logins that navigate between documents, and login forms inside iframes
-- [ ] TOTP codes ([#1](https://github.com/olgaysezgin/autologin-mcp/issues/1))
 - [ ] `doctor` and `test <profile>` commands
 - [ ] Installers that write the config for Codex CLI, Gemini CLI and Cursor (`print-config` prints it today); a Claude Code plugin
 

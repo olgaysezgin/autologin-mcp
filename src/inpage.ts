@@ -3,8 +3,8 @@
  * It must stay self-contained: no imports and no references to module scope.
  */
 
-export type InpageAction = 'detect' | 'state' | 'clear' | 'submit';
-export type FieldRole = 'username' | 'password';
+export type InpageAction = 'detect' | 'state' | 'clear' | 'submit' | 'code';
+export type FieldRole = 'username' | 'password' | 'code';
 
 export interface InpageSelectors {
   username?: string;
@@ -51,9 +51,15 @@ export interface StateResult {
 
 export type SubmitResult = 'clicked' | 'submitted' | 'none';
 
+/** The `code` action: the one-time-code field after the password, and its button, are tagged (#1). */
+export interface CodeResult {
+  found: boolean;
+  hasSubmit: boolean;
+}
+
 export const FIELD_ATTR = 'data-autologin-mcp';
 
-export function autologinInpage(action: InpageAction, arg: InpageArg): DetectResult | StateResult | SubmitResult | boolean {
+export function autologinInpage(action: InpageAction, arg: InpageArg): DetectResult | StateResult | SubmitResult | CodeResult | boolean {
   const ATTR = 'data-autologin-mcp';
   const SUBMIT_TEXT =
     /^(log ?-?in|sign ?-?in|login|signin|submit|continue|giri[sş]( yap)?|oturum a[cç]|anmelden|connexion|entrar|iniciar sesi[oó]n)$/i;
@@ -99,6 +105,14 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
   const text = (el: Element): string => el.textContent!.replace(/\s+/g, ' ').trim();
   /** What a button says: an input's value, or an element's text. */
   const label = (el: Element): string => (el instanceof HTMLInputElement ? el.value.trim() : text(el));
+  // A field for a one-time code (an authenticator app, SMS or email code): a second factor.
+  // Only clear names: a bare "code" or "securityCode" is as likely a promo code or a card's CVV after login.
+  // The last part of a name counts: Devise's user[otp_attempt], django-two-factor's token-otp_token.
+  const CODE_FIELD = /(^|[[-])(otp|totp|one[-_]?time[-_]?(code|password)|verification[-_]?code|(otp|totp|mfa|2fa|two[-_]?factor)[-_]?(code|token|attempt))\]?$/i;
+  const codeField = (el: Element): el is HTMLInputElement =>
+    usable(el) &&
+    el.type !== 'password' &&
+    ((el.getAttribute('autocomplete') ?? '').toLowerCase().split(/\s+/).includes('one-time-code') || [el.name, el.id].some((word) => CODE_FIELD.test(word)));
 
   if (action === 'state') {
     const findError = (): string | null => {
@@ -121,16 +135,7 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
       return null;
     };
     const errorText = findError();
-    // A field for a one-time code (an authenticator app, SMS or email code): a second factor.
-    // Only clear names: a bare "code" or "securityCode" is as likely a promo code or a card's CVV after login.
-    // The last part of a name counts: Devise's user[otp_attempt], django-two-factor's token-otp_token.
-    const CODE_FIELD = /(^|[[-])(otp|totp|one[-_]?time[-_]?(code|password)|verification[-_]?code|(otp|totp|mfa|2fa|two[-_]?factor)[-_]?(code|token|attempt))\]?$/i;
-    const codeVisible = Array.from(document.querySelectorAll('input')).some(
-      (el) =>
-        usable(el) &&
-        el.type !== 'password' &&
-        ((el.getAttribute('autocomplete') ?? '').toLowerCase().split(/\s+/).includes('one-time-code') || [el.name, el.id].some((word) => CODE_FIELD.test(word))),
-    );
+    const codeVisible = Array.from(document.querySelectorAll('input')).some(codeField);
     return {
       ready: document.readyState !== 'loading',
       passwordVisible: Array.from(document.querySelectorAll('input[type="password"]')).some(visible),
@@ -155,7 +160,7 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
       button.click();
       return 'clicked';
     }
-    const form = ((tagged('password') ?? tagged('username')) as HTMLInputElement | null)?.form;
+    const form = ((tagged('password') ?? tagged('username') ?? tagged('code')) as HTMLInputElement | null)?.form;
     if (form) {
       form.requestSubmit();
       return 'submitted';
@@ -163,8 +168,35 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
     return 'none';
   }
 
-  // detect: find the login form and tag its fields.
+  // detect and code tag what they find; tags from an earlier step would point at the wrong fields.
   document.querySelectorAll(`[${ATTR}]`).forEach((el) => el.removeAttribute(ATTR));
+
+  if (action === 'code') {
+    const field = Array.from(document.querySelectorAll('input')).find(codeField);
+    if (field === undefined) return { found: false, hasSubmit: false };
+    field.setAttribute(ATTR, 'code');
+    // The form's own submit button, or a Verify / Continue button after the field in its container:
+    // never "Resend code" or "Cancel", and never a button before the field.
+    const VERIFY_TEXT =
+      /^(verify|verify code|submit|continue|confirm|next|done|(log|sign) ?-?in|login|signin|do[gğ]rula|onayla|g[oö]nder|devam( et)?|giri[sş]( yap)?|best[aä]tigen|weiter|v[ée]rifier|valider|continuer|verificar|confirmar|continuar)$/i;
+    const enabled = (el: Element): boolean => visible(el) && !(el as HTMLButtonElement).disabled;
+    let button: Element | null =
+      (field.form &&
+        Array.from(field.form.querySelectorAll('button, input[type="submit"], input[type="image"]')).find(
+          (el) => enabled(el) && (el.tagName !== 'BUTTON' || (el as HTMLButtonElement).type === 'submit'),
+        )) ||
+      null;
+    for (let node = field.parentElement, depth = 0; button === null && node !== null && depth < 4; node = node.parentElement, depth += 1) {
+      button =
+        Array.from(node.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]')).find(
+          (el) => enabled(el) && precedes(field, el) && VERIFY_TEXT.test(label(el)),
+        ) ?? null;
+    }
+    button?.setAttribute(ATTR, 'submit');
+    return { found: true, hasSubmit: button !== null };
+  }
+
+  // detect: find the login form and tag its fields.
   const selectors = arg.selectors ?? {};
   const notFound = (field: string): DetectResult => ({
     found: false,

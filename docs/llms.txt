@@ -9,11 +9,12 @@ Key facts:
 - MCP tools: `list_profiles`, `login`, `login_status`, `open_config`.
 - Bridge mode (default, no browser setup): `login` returns a one-time script with a 60-second `127.0.0.1` URL, as `script` (Claude in Chrome `javascript_tool`), `function` (Playwright MCP `browser_evaluate`, chrome-devtools-mcp `evaluate_script`) or `expression` (Puppeteer `page.evaluate`). The page looks for the login form first and asks for the credentials only right before typing; they are released only if its browser-set Origin header matches the profile. Each script runs once.
 - CDP mode (automatic when Chrome remote debugging is on): autologin-mcp fills the tab itself over the Chrome DevTools Protocol, and never types into a page of another site.
-- Results: `success`, `submitted`, `failed` (with the page's error message), `no_login_form`, `rate_limited`, and `needs_human` with a reason when only a person can finish: `sso` (single sign-on), `passkey`, `captcha`, `mfa_required` (a one-time code after the password), `password_step_timeout`, `left_profile_site`. `needs_human` does not count toward the rate limit. If the agent's JavaScript call is cut off, `login_status` returns the outcome.
+- Results: `success`, `submitted`, `failed` (with the page's error message), `no_login_form`, `rate_limited`, and `needs_human` with a reason when only a person can finish: `sso` (single sign-on), `passkey`, `captcha`, `mfa_required` (a one-time code after the password, when the profile has no TOTP secret), `password_step_timeout`, `left_profile_site`. `needs_human` does not count toward the rate limit. If the agent's JavaScript call is cut off, `login_status` returns the outcome.
 - Identifier-first logins (username, then the password field on the same page) are filled in two steps.
 - Works with Claude Code + Claude in Chrome (tested), Playwright MCP, chrome-devtools-mcp and Puppeteer. `npx autologin-mcp print-config --client <codex|gemini|cursor|vscode|claude-desktop|hermes>` prints the setup for other agents.
 - Scripts and CI: `printf '%s' "$PASSWORD" | npx autologin-mcp add <name> --url <root> --username <user> --password-stdin -y` adds a profile without prompts.
-- Not filled (handed to a person instead): single sign-on, passkeys, captchas and one-time codes. Filling TOTP codes, logins that navigate to a second document, and iframes are on the roadmap.
+- Authenticator codes: with `<PROFILE>_TOTP_SECRET` (a base32 secret or an `otpauth://` URI; `add --totp`), the one-time code after the password is made on the user's machine (RFC 6238) and filled; the page only gets the current code. A rejected code returns `failed` with `reason: totp_rejected`.
+- Not filled (handed to a person instead): single sign-on, passkeys, captchas, and one-time codes without a TOTP secret (SMS, email). Logins that navigate to a second document, and iframes, are on the roadmap.
 - Requirements: Node.js 22.12+. License: MIT. Author: Olgay Sezgin.
 
 ## Documentation

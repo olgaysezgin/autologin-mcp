@@ -6,6 +6,7 @@ import { PassThrough } from 'node:stream';
 import { parse } from 'dotenv';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultContext, main, NO_PASSWORD_FLAG, packageSpec, parseArgs, STDIN_EXAMPLE, USAGE, type CliContext } from '../src/cli.ts';
+import { NO_TOTP_VALUE } from '../src/cli.ts';
 import type { ExecFn } from '../src/exec.ts';
 import type { SpawnFn } from '../src/opener.ts';
 import { InputClosedError, type Prompter } from '../src/prompt.ts';
@@ -399,5 +400,65 @@ describe('list / remove / edit', () => {
     expect(err).toContain('Could not open an editor (there is no desktop session here');
     expect(err).toContain(`EDITOR=nano npx autologin-mcp edit, or open ${file} yourself`);
     expect(err).toContain('npx autologin-mcp add');
+  });
+});
+
+describe('add --totp (#1)', () => {
+  const TOTP = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+
+  it('asks for the TOTP secret hidden and writes it next to the password', async () => {
+    const hidden: string[] = [];
+    const prompter = scripted(['Staging', 'staging.example.com', 'qa@example.com', 'pw-1', 'pw-1', ` ${TOTP} `], hidden);
+    expect(await main(['add', '--totp'], ctx({ prompter: () => prompter }))).toBe(0);
+    expect(parse(await fs.readFile(file, 'utf8'))).toEqual({
+      STAGING_URL: 'staging.example.com',
+      STAGING_USERNAME: 'qa@example.com',
+      STAGING_PASSWORD: 'pw-1',
+      STAGING_TOTP_SECRET: TOTP,
+    });
+    expect(hidden).toEqual(['Password (hidden): ', 'Repeat the password: ', 'TOTP secret or otpauth:// URI (hidden): ']);
+    expect(out).toContain('one-time codes');
+    expect(out + err).not.toContain(TOTP);
+  });
+
+  it('refuses a missing or unusable secret', async () => {
+    expect(await main(['add', 'app', '--url', 'x.test', '--username', 'u', '--totp'], ctx({}, ['pw', 'pw', '']))).toBe(1);
+    expect(err).toContain('A TOTP secret is required with --totp.');
+    expect(await main(['add', 'app', '--url', 'x.test', '--username', 'u', '--totp'], ctx({}, ['pw', 'pw', 'not base32!']))).toBe(1);
+    expect(err).toContain('The TOTP secret is not usable: not a base32 secret or an otpauth:// URI');
+    await expect(fs.stat(file)).rejects.toThrow();
+  });
+
+  it('reads the password and the secret as two piped lines', async () => {
+    const argv = ['add', 'app', '--url', 'x.test', '--username', 'u', '--password-stdin', '--totp'];
+    expect(await main(argv, ctx({ stdin: piped(`pw 1\r\notpauth://totp/App:u?secret=${TOTP}&issuer=App\n`), prompter: noPrompts }))).toBe(0);
+    expect(parse(await fs.readFile(file, 'utf8'))).toMatchObject({ APP_PASSWORD: 'pw 1', APP_TOTP_SECRET: `otpauth://totp/App:u?secret=${TOTP}&issuer=App` });
+    expect(out + err).not.toContain(TOTP);
+  });
+
+  it.each([
+    ['pw', 'With --totp, pipe two lines: the password, then the TOTP secret.'],
+    ['pw\nA\nB', 'With --totp, pipe two lines: the password, then the TOTP secret.'],
+    ['pw\n', 'With --totp, pipe two lines: the password, then the TOTP secret.'],
+    ['\nX', 'A password is required: nothing was piped in.'],
+    ['pw\nnot base32!', 'The TOTP secret is not usable'],
+  ])('refuses %j piped in with --totp', async (input, message) => {
+    expect(await main(['add', 'app', '--url', 'x.test', '--username', 'u', '--password-stdin', '--totp'], ctx({ stdin: piped(input), prompter: noPrompts }))).toBe(1);
+    expect(err).toContain(message);
+    await expect(fs.stat(file)).rejects.toThrow();
+  });
+
+  it('takes no value on the command line, where it would stay in the shell history', () => {
+    expect(parseArgs(['add', 'app', '--totp']).flags.totp).toBe(true);
+    expect(parseArgs(['add', 'app']).flags).not.toHaveProperty('totp');
+    expect(() => parseArgs(['add', 'app', `--totp=${TOTP}`])).toThrow(NO_TOTP_VALUE);
+  });
+
+  it('marks TOTP profiles in the list, without the secret', async () => {
+    await main(['add', 'app', '--url', 'x.test', '--username', 'u', '--password-stdin', '--totp'], ctx({ stdin: piped(`pw\n${TOTP}`), prompter: noPrompts }));
+    out = '';
+    expect(await main(['list'], ctx())).toBe(0);
+    expect(out).toMatch(/app\s+x\.test\s+u\s+TOTP/);
+    expect(out).not.toContain(TOTP);
   });
 });

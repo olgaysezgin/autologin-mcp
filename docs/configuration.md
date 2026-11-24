@@ -29,6 +29,7 @@ LOCAL_USERNAME_SELECTOR=#email
 LOCAL_PASSWORD_SELECTOR=#password
 LOCAL_SUBMIT_SELECTOR=button[type=submit]
 LOCAL_SUCCESS_SELECTOR=[data-test=user-menu]
+LOCAL_TOTP_SECRET=JBSWY3DPEHPK3PXP
 
 AUTOLOGIN_MODE=auto
 ```
@@ -46,9 +47,26 @@ A profile is a group of keys that share a prefix. `STAGING_URL`, `STAGING_USERNA
 | `<PROFILE>_PASSWORD_SELECTOR` | no | CSS selector of the password field |
 | `<PROFILE>_SUBMIT_SELECTOR` | no | CSS selector of the element to click to log in |
 | `<PROFILE>_SUCCESS_SELECTOR` | no | CSS selector of an element that only exists after a successful login, for apps where the login form stays on the page |
+| `<PROFILE>_TOTP_SECRET` | no | The account's authenticator secret, as base32 or an `otpauth://totp/...` URI, for the one-time code after the password. See [Authenticator codes](#authenticator-codes-totp). Never shown to the agent. |
 | `<PROFILE>_AUTO_LOGIN` | no | Reserved for the planned opt-in auto-login (`true`/`false`). It has no effect yet. |
 
 A profile with a missing or invalid key is listed with its `problems` by `list_profiles` and `npx autologin-mcp list`, and is not used for logins.
+
+### Authenticator codes (TOTP)
+
+When the app asks for a code from an authenticator app after the password, give the profile that account's TOTP secret, and autologin-mcp fills the code too:
+
+```bash
+npx autologin-mcp add staging --totp            # asks for the TOTP secret hidden, after the password
+printf '%s\n%s' "$PASSWORD" "$TOTP_SECRET" | npx autologin-mcp add staging \
+  --url staging.example.com --username qa@example.com --password-stdin --totp -y
+```
+
+- The secret is the base32 text an app offers under "Can't scan the code?", or the whole `otpauth://totp/...` URI inside the QR code. A URI may set `algorithm` (SHA1, SHA256, SHA512), `digits` (6 to 8) and `period`; the defaults are SHA-1, 6 digits and 30 seconds.
+- The code is made on this machine (RFC 6238) right before it is typed, and the page only gets the current code, once per login. The secret is redacted from every tool result.
+- If less than 3 seconds of the current code are left, autologin-mcp waits for the next one. A rejected code returns `failed` with `reason: totp_rejected` and counts toward the rate limit.
+- Codes sent by SMS or email, push approvals and security keys are not covered: without a TOTP secret the code step is handed to a person (`needs_human`, `reason: mfa_required`).
+- With the password and the TOTP secret in one file, the account's second factor becomes part of the first. Use this for test accounts only.
 
 ### Several accounts for the same app
 

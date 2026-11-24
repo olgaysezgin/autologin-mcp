@@ -15,6 +15,7 @@ import { createServer } from '../../src/server.ts';
 import { buildStore, isUsable, type UsableProfile } from '../../src/store/profiles.ts';
 import { launchChrome, type TestChrome } from '../helpers/chrome.ts';
 import { startFixtureServer, VALID, type FixtureServer } from '../helpers/fixture-server.ts';
+import { TOTP_SECRET } from '../helpers/fixture-server.ts';
 
 const FAST: LoginTiming = { detectTimeoutMs: 3_000, verifyTimeoutMs: 5_000, pollMs: 100, earlyFailAfterMs: 400 };
 
@@ -105,6 +106,17 @@ describe('login engine in a real Chrome (auto-connect via DevToolsActivePort)', 
     const { result } = await loginOn('mfa.html', profile());
     expect(result).toMatchObject({ status: 'needs_human', reason: 'mfa_required', hint: expect.stringContaining('one-time code') });
     expect(app.received.at(-1)).toEqual(VALID);
+  });
+
+  it('fills the authenticator code from the profile\'s TOTP secret, and reports a wrong secret (#1)', async () => {
+    const { result } = await loginOn('totp.html', profile({ APP_TOTP_SECRET: TOTP_SECRET }));
+    expect(result).toMatchObject({ status: 'success', profile: 'app' });
+    expect(app.received.at(-1)).toEqual(VALID);
+    expect(app.codes.at(-1)).toMatch(/^\d{6}$/);
+    expect(JSON.stringify(result)).not.toContain(app.codes.at(-1));
+
+    const wrong = await loginOn('totp.html', profile({ APP_TOTP_SECRET: 'JBSWY3DPEHPK3PXP' }));
+    expect(wrong.result).toMatchObject({ status: 'failed', reason: 'totp_rejected', hint: 'That code is not valid' });
   });
 
   it('types nothing on another site when the username step leads there', async () => {
@@ -256,6 +268,23 @@ describe('bridge mode in a real Chrome (autologin-mcp has no CDP access)', () =>
     const { result } = await bridgeOn('mfa.html', profile());
     expect(result).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
     expect(app.received.at(-1)).toEqual(VALID);
+  });
+
+  it('fills the authenticator code in bridge mode, asking for it only at the code step (#1)', async () => {
+    const tab = await open('totp.html');
+    const asked: string[] = [];
+    tab.on('request', (request) => {
+      if (request.url().includes('/v1/')) asked.push(new URL(request.url()).pathname.split('/')[2]!);
+    });
+    const fn = (await bridge.issue(profile({ APP_TOTP_SECRET: TOTP_SECRET }))).function;
+    expect(await tab.evaluate(`(${fn})()`)).toMatchObject({ status: 'success' });
+    expect(app.received.at(-1)).toEqual(VALID);
+    expect(app.codes.at(-1)).toMatch(/^\d{6}$/);
+    expect(asked).toEqual(['filler', 'credentials', 'code', 'result']);
+
+    const wrong = await bridgeOn('totp.html', profile({ APP_TOTP_SECRET: 'JBSWY3DPEHPK3PXP' }));
+    expect(wrong.result).toMatchObject({ status: 'failed', reason: 'totp_rejected', hint: 'That code is not valid' });
+    await vi.waitFor(() => expect(reports.at(-1)![1]).toMatchObject({ status: 'failed', reason: 'totp_rejected' }));
   });
 
   it('runs a script once: after a run that found no form, a re-run types nothing (#2 review)', async () => {

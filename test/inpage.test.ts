@@ -349,6 +349,48 @@ describe('pages a person has to finish (#2)', () => {
   });
 });
 
+describe('code: the one-time-code step after the password (#1)', () => {
+  const code = () => autologinInpage('code', {});
+
+  it('tags the code field and the submit button of its form', () => {
+    document.body.innerHTML = `<form><input name="otp" inputmode="numeric"><button type="button">Resend code</button><button type="submit">Verify</button></form>`;
+    expect(code()).toEqual({ found: true, hasSubmit: true });
+    expect(roleOf('input')).toBe('code');
+    expect(document.querySelector(`[${FIELD_ATTR}="submit"]`)!.textContent).toBe('Verify');
+  });
+
+  it('finds the Verify button next to a field outside any form, and never one before the field', () => {
+    document.body.innerHTML = `<div id="step"><button>Continue</button><label>Code from your authenticator app <input id="otp" autocomplete="one-time-code"></label><button>Cancel</button><button>Verify</button></div>`;
+    expect(code()).toEqual({ found: true, hasSubmit: true });
+    expect(document.querySelector(`[${FIELD_ATTR}="submit"]`)!.textContent).toBe('Verify');
+  });
+
+  it('reports a code field without a button, and submits its form instead', () => {
+    document.body.innerHTML = `<form><input name="totp"></form>`;
+    const onSubmit = vi.fn((e: Event) => e.preventDefault());
+    document.querySelector('form')!.addEventListener('submit', onSubmit);
+    expect(code()).toEqual({ found: true, hasSubmit: false });
+    expect(autologinInpage('submit', {})).toBe('submitted');
+    expect(onSubmit).toHaveBeenCalledOnce();
+    document.body.innerHTML = `<input autocomplete="one-time-code"><a href="/help">Help</a>`;
+    expect(code()).toEqual({ found: true, hasSubmit: false });
+    expect(autologinInpage('submit', {})).toBe('none');
+  });
+
+  it('finds nothing without a clear one-time-code field, and drops tags from earlier steps', () => {
+    document.body.innerHTML = `<input name="promo_code" ${FIELD_ATTR}="password"><input autocomplete="one-time-code" style="display:none"><button>Verify</button>`;
+    expect(code()).toEqual({ found: false, hasSubmit: false });
+    expect(document.querySelectorAll(`[${FIELD_ATTR}]`)).toHaveLength(0);
+  });
+
+  it('clears the code field like the others', () => {
+    document.body.innerHTML = `<input name="otp" value="123456">`;
+    code();
+    expect(autologinInpage('clear', { role: 'code' })).toBe(true);
+    expect(document.querySelector('input')!.value).toBe('');
+  });
+});
+
 describe('pages a person has to finish: no false alarms (#2 review)', () => {
   it('does not take a passkey settings link on a logged-in page for a passkey login', () => {
     for (const markup of ['<nav><a href="/settings">Security: add a passkey</a></nav><p>Dashboard</p>', '<p>Welcome</p><button>Create a passkey</button>']) {

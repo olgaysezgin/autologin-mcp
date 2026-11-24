@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { DetectResult, InpageAction, StateResult } from '../src/inpage.ts';
+import type { CodeResult } from '../src/inpage.ts';
 import { DEFAULT_TIMING, performLogin, realClock, type Clock, type ElementLike, type PageLike } from '../src/login/engine.ts';
 import { buildStore, type UsableProfile } from '../src/store/profiles.ts';
+import { totpCode } from '../src/totp.ts';
 
 const profile = buildStore({ APP_URL: 'app.test', APP_USERNAME: 'qa', APP_PASSWORD: 'pw', APP_SUCCESS_SELECTOR: '#menu' })
   .profiles[0] as UsableProfile;
@@ -358,5 +360,93 @@ describe('pages a person has to finish (#2)', () => {
     const page = new FakePage([FOUND], [onForm(), code]);
     expect(await performLogin(page, profile, timing, fakeClock())).toMatchObject({ status: 'needs_human', reason: 'mfa_required', hint: expect.stringContaining('one-time code') });
     expect(page.typed).toEqual(['qa', 'pw']);
+  });
+});
+
+describe('TOTP codes after the password (#1)', () => {
+  const totpProfile = buildStore({ APP_URL: 'app.test', APP_USERNAME: 'qa', APP_PASSWORD: 'pw', APP_TOTP_SECRET: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ' })
+    .profiles[0] as UsableProfile;
+  const codeStep = (errorText: string | null = null): StateResult => ({ ready: true, passwordVisible: false, success: false, errorText, codeVisible: true });
+  const expected = (t: number) => totpCode(totpProfile.totp!, t);
+
+  /** A FakePage that also answers the `code` action. */
+  class CodePage extends FakePage {
+    codeResult: CodeResult = { found: true, hasSubmit: true };
+    constructor(detects: DetectResult[], states: StateResult[]) {
+      super(detects, states);
+      this.elements.add('code');
+    }
+    override async run<T>(action: InpageAction): Promise<T> {
+      if (action !== 'code') return super.run<T>(action);
+      this.calls.push('code');
+      return this.codeResult as T;
+    }
+  }
+
+  it('fills the current code from the profile\'s secret, submits it and succeeds', async () => {
+    const page = new CodePage([FOUND], [onForm(), codeStep(), gone, gone]);
+    expect(await performLogin(page, totpProfile, timing, fakeClock())).toEqual({ status: 'success', profile: 'app', url: 'https://app.test/login' });
+    expect(page.typed).toEqual(['qa', 'pw', expected(250)]);
+    expect(page.calls.filter((c) => c === 'click:submit')).toHaveLength(2);
+    expect(page.calls).toContain('focus:code');
+  });
+
+  it('waits for the next code when the current one is about to expire', async () => {
+    const page = new CodePage([FOUND], [onForm(), codeStep(), gone, gone]);
+    const clock = fakeClock();
+    clock.t = 27_500;
+    expect((await performLogin(page, totpProfile, timing, clock)).status).toBe('success');
+    expect(page.typed[2]).toBe(expected(30_050));
+    expect(page.typed[2]).not.toBe(expected(27_750));
+  });
+
+  it('reports a code the page rejects as failed, with the code scrubbed from the page\'s message', async () => {
+    const code = expected(250);
+    const page = new CodePage([FOUND], [onForm(), codeStep(), codeStep(`Code ${code} is not valid`)]);
+    const clock = fakeClock();
+    expect(await performLogin(page, totpProfile, timing, clock)).toEqual({
+      status: 'failed',
+      profile: 'app',
+      url: 'https://app.test/login',
+      reason: 'totp_rejected',
+      hint: 'Code [REDACTED] is not valid',
+    });
+    expect(clock.t).toBe(250 + timing.earlyFailAfterMs);
+  });
+
+  it('fails with a hint about the secret and the clock when the code step stays', async () => {
+    const page = new CodePage([FOUND], [onForm(), codeStep()]);
+    const clock = fakeClock();
+    expect(await performLogin(page, totpProfile, timing, clock)).toMatchObject({ status: 'failed', reason: 'totp_rejected', hint: expect.stringContaining('clock') });
+    expect(clock.t).toBe(250 + timing.verifyTimeoutMs);
+  });
+
+  it('sends one code only: a code step that comes back after the password form is a plain failure', async () => {
+    const page = new CodePage([FOUND], [onForm(), codeStep(), onForm()]);
+    expect(await performLogin(page, totpProfile, timing, fakeClock())).toMatchObject({ status: 'failed', reason: 'still_on_login_form' });
+    expect(page.typed).toHaveLength(3);
+  });
+
+  it('hands the step to a person when the code field cannot be tagged, or the profile has no secret', async () => {
+    const untagged = new CodePage([FOUND], [onForm(), codeStep()]);
+    untagged.codeResult = { found: false, hasSubmit: false };
+    expect(await performLogin(untagged, totpProfile, timing, fakeClock())).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
+    expect(untagged.typed).toEqual(['qa', 'pw']);
+    const noSecret = new CodePage([FOUND], [onForm(), codeStep()]);
+    expect(await performLogin(noSecret, profile, timing, fakeClock())).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
+    expect(noSecret.calls).not.toContain('code');
+  });
+
+  it('presses Enter when the code step has no button, and types nothing on another site', async () => {
+    const enter = new CodePage([FOUND], [onForm(), codeStep(), gone, gone]);
+    enter.codeResult = { found: true, hasSubmit: false };
+    enter.submitResult = 'none';
+    expect((await performLogin(enter, totpProfile, timing, fakeClock())).status).toBe('success');
+    expect(enter.calls).toContain('press:Enter');
+
+    const away = new CodePage([FOUND], [onForm(), codeStep()]);
+    away.onSubmit = () => (away.currentUrl = 'https://mfa.other.test/verify');
+    expect(await performLogin(away, totpProfile, timing, fakeClock())).toMatchObject({ status: 'needs_human', reason: 'left_profile_site' });
+    expect(away.typed).toEqual(['qa', 'pw']);
   });
 });

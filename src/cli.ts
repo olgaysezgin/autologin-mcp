@@ -14,6 +14,7 @@ import { serve } from './serve.js';
 import { appendBlock, ensureEnvFile, loadStore, permissionWarning, readText, removeProfile, renderProfile, writeSecureFile } from './store/envfile.js';
 import { parseRootUrl } from './store/match.js';
 import { PROFILE_NAME_RE, SETTINGS_PREFIX } from './store/profiles.js';
+import { parseTotpSecret } from './totp.js';
 import { ENV_TEMPLATE } from './templates.js';
 import { VERSION } from './version.js';
 
@@ -40,10 +41,12 @@ Usage:
                                        (--package: what npx runs, e.g. a local .tgz to test a build)
   npx autologin-mcp uninstall [-y] [--dry-run] [--purge]
                                        Undo install (--purge also deletes your credentials file)
-  npx autologin-mcp add [name] [--url <root-url>] [--username <user>] [-y]
-                                       Add or replace a login profile (the password is asked hidden)
-  npx autologin-mcp add <name> --url <root-url> --username <user> --password-stdin [-y]
-                                       Same, with the password piped in (scripts, CI)
+  npx autologin-mcp add [name] [--url <root-url>] [--username <user>] [--totp] [-y]
+                                       Add or replace a login profile (the password is asked hidden;
+                                       --totp also asks for a TOTP secret, for one-time codes)
+  npx autologin-mcp add <name> --url <root-url> --username <user> --password-stdin [--totp] [-y]
+                                       Same, with the password piped in (scripts, CI); with --totp,
+                                       pipe two lines: the password, then the TOTP secret
   npx autologin-mcp list               List profiles (passwords are never shown)
   npx autologin-mcp remove <name> [-y] Delete a profile
   npx autologin-mcp edit               Open the credentials file in $VISUAL / $EDITOR or the default editor
@@ -66,6 +69,8 @@ export interface ParsedArgs {
     help: boolean;
     version: boolean;
     passwordStdin: boolean;
+    /** Also store a TOTP secret: asked hidden, or the second piped line with --password-stdin (#1). */
+    totp?: boolean;
     url?: string;
     username?: string;
     package?: string;
@@ -75,6 +80,18 @@ export interface ParsedArgs {
 
 export const NO_PASSWORD_FLAG =
   '--password is not supported: it would leave the password in your shell history and the process list. Pipe it in with --password-stdin instead.';
+
+export const NO_TOTP_VALUE =
+  '--totp takes no value: it would leave the secret in your shell history. The secret is asked hidden, or piped in as the second line with --password-stdin.';
+
+const TOTP_STDIN = 'With --totp, pipe two lines: the password, then the TOTP secret.';
+
+/** What is wrong with a TOTP secret typed or piped in, or null. */
+function totpProblem(secret: string): string | null {
+  if (secret.trim() === '') return 'A TOTP secret is required with --totp.';
+  const parsed = parseTotpSecret(secret);
+  return parsed.ok ? null : `The TOTP secret is not usable: ${parsed.error}`;
+}
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const flags: ParsedArgs['flags'] = { yes: false, dryRun: false, purge: false, help: false, version: false, passwordStdin: false };
@@ -89,6 +106,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
     else if (name === '-v' || name === '--version') flags.version = true;
     else if (name === '--password-stdin') flags.passwordStdin = true;
     else if (name === '--password') throw new Error(NO_PASSWORD_FLAG);
+    else if (name === '--totp') {
+      if (inline !== undefined) throw new Error(NO_TOTP_VALUE);
+      flags.totp = true;
+    }
     else if (name === '--url' || name === '--username' || name === '--package' || name === '--client') {
       const value = inline ?? argv[++i];
       if (value === undefined) throw new Error(`${name} needs a value`);
@@ -129,7 +150,12 @@ const invalidName = (name: string): string | null =>
     : `Invalid profile name "${name}": use letters, digits and _ (not starting with ${SETTINGS_PREFIX.toLowerCase()}).`;
 
 /** Writes the profile, replacing an existing one with the same name. Returns an error message or null. */
-async function saveProfile(ctx: CliContext, file: string, profile: { name: string; url: string; username: string; password: string }, exists: boolean): Promise<string | null> {
+async function saveProfile(
+  ctx: CliContext,
+  file: string,
+  profile: { name: string; url: string; username: string; password: string; totpSecret?: string },
+  exists: boolean,
+): Promise<string | null> {
   let block: string;
   try {
     block = renderProfile(profile);
@@ -141,6 +167,7 @@ async function saveProfile(ctx: CliContext, file: string, profile: { name: strin
   await writeSecureFile(file, appendBlock(base, block));
   line(ctx.stdout, `✓ Saved profile "${profile.name}" (${profile.url}) to ${file}`);
   line(ctx.stdout, '  The password is stored only in this file and is never shown to the AI.');
+  if (profile.totpSecret !== undefined) line(ctx.stdout, '  So is the TOTP secret: autologin-mcp makes the one-time codes itself. Use it for test accounts only.');
   return null;
 }
 
@@ -166,13 +193,22 @@ async function addFromStdin(ctx: CliContext, args: ParsedArgs, file: string, fai
   if (!parsed.ok) return fail(parsed.error);
   if (username === '') return fail('A username is required.');
   // One trailing newline (from echo or a here-string) is not part of the password.
-  const password = (await readAll(ctx.stdin)).replace(/\r?\n$/, '');
+  const input = (await readAll(ctx.stdin)).replace(/\r?\n$/, '');
+  let password = input;
+  let totpSecret: string | undefined;
+  if (args.flags.totp) {
+    const lines = input.split(/\r?\n/);
+    if (lines.length !== 2) return fail(TOTP_STDIN);
+    [password, totpSecret] = lines as [string, string];
+  }
   if (password === '') return fail('A password is required: nothing was piped in.');
   if (/[\r\n]/.test(password)) return fail('The password must be a single line.');
+  const problem = totpSecret === undefined ? null : totpProblem(totpSecret);
+  if (problem !== null) return fail(problem);
   const store = await loadStore(file);
   const exists = store.profiles.some((p) => p.name === name);
   if (exists && !args.flags.yes) return fail(`Profile "${name}" already exists. Add -y to replace it.`);
-  const error = await saveProfile(ctx, file, { name, url: parsed.normalized, username, password }, exists);
+  const error = await saveProfile(ctx, file, { name, url: parsed.normalized, username, password, totpSecret: totpSecret?.trim() }, exists);
   return error === null ? 0 : fail(error);
 }
 
@@ -202,8 +238,14 @@ async function addCommand(ctx: CliContext, args: ParsedArgs): Promise<number> {
     const password = await prompter.askHidden('Password (hidden): ');
     if (password === '') return fail('A password is required.');
     if ((await prompter.askHidden('Repeat the password: ')) !== password) return fail('The passwords do not match.');
+    let totpSecret: string | undefined;
+    if (args.flags.totp) {
+      totpSecret = await prompter.askHidden('TOTP secret or otpauth:// URI (hidden): ');
+      const problem = totpProblem(totpSecret);
+      if (problem !== null) return fail(problem);
+    }
 
-    const error = await saveProfile(ctx, file, { name, url: parsed.normalized, username, password }, exists);
+    const error = await saveProfile(ctx, file, { name, url: parsed.normalized, username, password, totpSecret: totpSecret?.trim() }, exists);
     return error === null ? 0 : fail(error);
   } catch (error) {
     if (error instanceof InputClosedError) return fail(error.message);
@@ -227,7 +269,7 @@ async function listCommand(ctx: CliContext): Promise<number> {
   const width = Math.max(7, ...store.profiles.map((p) => p.name.length));
   for (const p of store.profiles) {
     const problems = p.problems.length > 0 ? `  ! ${p.problems.join('; ')}` : '';
-    line(ctx.stdout, `  ${p.name.padEnd(width)}  ${p.url || '-'}  ${p.username ?? '-'}${problems}`);
+    line(ctx.stdout, `  ${p.name.padEnd(width)}  ${p.url || '-'}  ${p.username ?? '-'}${p.totp !== undefined ? '  TOTP' : ''}${problems}`);
   }
   for (const warn of store.warnings) line(ctx.stderr, `! ${warn}`);
   return 0;

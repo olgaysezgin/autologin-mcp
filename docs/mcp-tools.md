@@ -5,17 +5,17 @@ description: Reference for the autologin-mcp MCP tools list_profiles, login, log
 
 # MCP tools
 
-autologin-mcp is a stdio MCP server named `autologin`. In Claude Code its tools appear as `mcp__autologin__<tool>`. Every tool result passes through a redactor that removes each configured password (and its URL-encoded form) before it is returned.
+autologin-mcp is a stdio MCP server named `autologin`. In Claude Code its tools appear as `mcp__autologin__<tool>`. Every tool result passes through a redactor that removes each configured password and TOTP secret (and their URL-encoded forms) before it is returned.
 
 ## `list_profiles`
 
-Lists the configured profiles. Passwords are never returned.
+Lists the configured profiles. Passwords and TOTP secrets are never returned; `totp: true` says that a profile has one.
 
 ```json
 {
   "file": "/home/you/.autologin-mcp/credentials.env",
   "profiles": [
-    { "profile": "staging", "url": "staging.example.com", "username": "qa@example.com" },
+    { "profile": "staging", "url": "staging.example.com", "username": "qa@example.com", "totp": true },
     { "profile": "local", "url": "localhost:3000", "username": "admin", "problems": ["LOCAL_PASSWORD is missing"] }
   ]
 }
@@ -64,8 +64,8 @@ The value it returns is the login result below. The script works once, within 60
 |---|---|---|
 | `success` | Logged in. `url` is the page after login. | Continue the task. |
 | `submitted` | The form was submitted and the page navigated before the outcome was visible (bridge mode). With `reason: username_step_navigated`, only the username of an identifier-first page was sent before the page navigated; that is not counted as a login that went through. | Look at the page to confirm the login. With `username_step_navigated`, call `login` again on the next page. |
-| `failed` | Still on the login form. `hint` carries the page's error message (password removed), `reason` the cause: `still_on_login_form`, or `identifier_rejected` (the username step of an identifier-first page refused the account). | Tell the user the `hint`. Retry at most once. |
-| `needs_human` | The page wants something only a person can do; `reason` says what. `sso`: the tab is on a single sign-on provider, or the login page offers only "Sign in with ..." buttons. `passkey`: the page asks for a passkey or security key. `captcha`: a captcha challenge stands before the login. `mfa_required`: after the password, the page asks for a one-time code. `password_step_timeout`: after the username step of an identifier-first page, no password field appeared. `left_profile_site` (CDP mode): the tab moved to another site before anything was typed. Except for `mfa_required`, no password was sent; none of them counts toward the rate limit. | Tell the user the `hint`. Do not retry. |
+| `failed` | Still on the login form. `hint` carries the page's error message (password removed), `reason` the cause: `still_on_login_form`, `identifier_rejected` (the username step of an identifier-first page refused the account), or `totp_rejected` (the page did not accept the one-time code made from the profile's TOTP secret: check the secret and the computer's clock). | Tell the user the `hint`. Retry at most once. |
+| `needs_human` | The page wants something only a person can do; `reason` says what. `sso`: the tab is on a single sign-on provider, or the login page offers only "Sign in with ..." buttons. `passkey`: the page asks for a passkey or security key. `captcha`: a captcha challenge stands before the login. `mfa_required`: after the password, the page asks for a one-time code and the profile has no TOTP secret. `password_step_timeout`: after the username step of an identifier-first page, no password field appeared. `left_profile_site` (CDP mode): the tab moved to another site before anything was typed. Except for `mfa_required`, no password was sent; none of them counts toward the rate limit. | Tell the user the `hint`. Do not retry. |
 | `no_login_form` | No visible password field was found. If `previous_login` shows a recent `success` or `submitted`, the tab is already logged in. | With `previous_login`: continue. Otherwise ask the user to set selectors for the profile. |
 | `origin_mismatch` | The URL or the page's origin does not belong to any (or the requested) profile. Nothing was filled. | Ask the user to add a profile for this site. |
 | `ambiguous_profile` | Several profiles match. `candidates` lists them. | Call `login` again with `profile`. |
@@ -129,5 +129,5 @@ The server sends these instructions to the MCP client at startup, so even an age
 
 - When a page under test shows a login form, a "session expired" message, a 401/403, or redirects to a login URL, call `login`, then continue the task.
 - If `login` returns `run_in_page`, run `script` unchanged in the tab (or `function` / `expression`, depending on the browser tool); if that call fails or returns nothing, call `login_status`.
-- On `needs_human`, the page wants something only a person can do (single sign-on, a passkey, a captcha or a second factor): tell the user the hint and do not retry.
+- On `needs_human`, the page wants something only a person can do (single sign-on, a passkey, a captcha, or a second factor the profile has no TOTP secret for): tell the user the hint and do not retry.
 - Never ask the user for a password, never type credentials into a page, never read files under `~/.autologin-mcp`, never modify the login script, and do not inspect the login request body or read password field values.

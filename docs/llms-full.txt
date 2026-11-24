@@ -97,6 +97,8 @@ In a script or CI job, pipe the password in instead of typing it:
 printf '%s' "$STAGING_PASSWORD" | npx autologin-mcp add staging --url staging.example.com --username qa@example.com --password-stdin -y
 ```
 
+Does the test account ask for a code from an authenticator app after the password? Add `--totp` and give it the account's TOTP secret too; autologin-mcp then fills the code. See [Authenticator codes](configuration.md#authenticator-codes-totp).
+
 Check what the agent will see:
 
 ```bash
@@ -218,11 +220,16 @@ After submitting, autologin-mcp watches the page for up to 10 seconds:
 | The element in `<PROFILE>_SUCCESS_SELECTOR` appears | `success` |
 | The password field disappears (two checks in a row; when it goes away right at the 10-second mark, one more check decides) | `success` |
 | A new error message appears (the message the field points to with `aria-describedby`/`aria-errormessage`, `role="alert"`, or an error-styled element) | `failed`, with that message as `hint` |
-| The password field gives way to a one-time-code field (`autocomplete="one-time-code"`, or a name such as `otp` or `totp_code`) | `needs_human`, `reason: mfa_required`: a person enters the code |
+| The password field gives way to a one-time-code field (`autocomplete="one-time-code"`, or a name such as `otp` or `totp_code`), and the profile has a TOTP secret | autologin-mcp fills the current code and submits it, then watches again: `success`, or `failed` with `reason: totp_rejected` |
+| The same, without a TOTP secret | `needs_human`, `reason: mfa_required`: a person enters the code |
 | The page starts navigating (bridge mode) | `submitted`: the agent should look at the page |
 | Still on the form after 10 seconds | `failed` |
 
-On `failed`, the password field is cleared and the password is removed from any text that is returned. After three failed logins in five minutes, the profile is paused (`rate_limited`), so a wrong password cannot lock the account.
+On `failed`, the password field is cleared and the password (and a one-time code, if one was sent) is removed from any text that is returned.
+
+The one-time code is made on your machine from the profile's TOTP secret (RFC 6238; SHA-1, 6 digits and 30 seconds unless an `otpauth://` URI says otherwise). In CDP mode autologin-mcp types it; in bridge mode the page asks the bridge for it once, when it shows the code step, under the same origin check as the credentials. The secret itself never leaves autologin-mcp. When less than 3 seconds of the current code are left, it waits for the next one.
+
+After three failed logins in five minutes, the profile is paused (`rate_limited`), so a wrong password cannot lock the account.
 
 ## Why not let the agent type the password?
 
@@ -258,6 +265,7 @@ LOCAL_USERNAME_SELECTOR=#email
 LOCAL_PASSWORD_SELECTOR=#password
 LOCAL_SUBMIT_SELECTOR=button[type=submit]
 LOCAL_SUCCESS_SELECTOR=[data-test=user-menu]
+LOCAL_TOTP_SECRET=JBSWY3DPEHPK3PXP
 
 AUTOLOGIN_MODE=auto
 ```
@@ -275,9 +283,26 @@ A profile is a group of keys that share a prefix. `STAGING_URL`, `STAGING_USERNA
 | `<PROFILE>_PASSWORD_SELECTOR` | no | CSS selector of the password field |
 | `<PROFILE>_SUBMIT_SELECTOR` | no | CSS selector of the element to click to log in |
 | `<PROFILE>_SUCCESS_SELECTOR` | no | CSS selector of an element that only exists after a successful login, for apps where the login form stays on the page |
+| `<PROFILE>_TOTP_SECRET` | no | The account's authenticator secret, as base32 or an `otpauth://totp/...` URI, for the one-time code after the password. See [Authenticator codes](#authenticator-codes-totp). Never shown to the agent. |
 | `<PROFILE>_AUTO_LOGIN` | no | Reserved for the planned opt-in auto-login (`true`/`false`). It has no effect yet. |
 
 A profile with a missing or invalid key is listed with its `problems` by `list_profiles` and `npx autologin-mcp list`, and is not used for logins.
+
+### Authenticator codes (TOTP)
+
+When the app asks for a code from an authenticator app after the password, give the profile that account's TOTP secret, and autologin-mcp fills the code too:
+
+```bash
+npx autologin-mcp add staging --totp            # asks for the TOTP secret hidden, after the password
+printf '%s\n%s' "$PASSWORD" "$TOTP_SECRET" | npx autologin-mcp add staging \
+  --url staging.example.com --username qa@example.com --password-stdin --totp -y
+```
+
+- The secret is the base32 text an app offers under "Can't scan the code?", or the whole `otpauth://totp/...` URI inside the QR code. A URI may set `algorithm` (SHA1, SHA256, SHA512), `digits` (6 to 8) and `period`; the defaults are SHA-1, 6 digits and 30 seconds.
+- The code is made on this machine (RFC 6238) right before it is typed, and the page only gets the current code, once per login. The secret is redacted from every tool result.
+- If less than 3 seconds of the current code are left, autologin-mcp waits for the next one. A rejected code returns `failed` with `reason: totp_rejected` and counts toward the rate limit.
+- Codes sent by SMS or email, push approvals and security keys are not covered: without a TOTP secret the code step is handed to a person (`needs_human`, `reason: mfa_required`).
+- With the password and the TOTP secret in one file, the account's second factor becomes part of the first. Use this for test accounts only.
 
 ### Several accounts for the same app
 
@@ -346,17 +371,17 @@ The values in the credentials file are parsed in memory. They are never copied i
 
 # MCP tools
 
-autologin-mcp is a stdio MCP server named `autologin`. In Claude Code its tools appear as `mcp__autologin__<tool>`. Every tool result passes through a redactor that removes each configured password (and its URL-encoded form) before it is returned.
+autologin-mcp is a stdio MCP server named `autologin`. In Claude Code its tools appear as `mcp__autologin__<tool>`. Every tool result passes through a redactor that removes each configured password and TOTP secret (and their URL-encoded forms) before it is returned.
 
 ## `list_profiles`
 
-Lists the configured profiles. Passwords are never returned.
+Lists the configured profiles. Passwords and TOTP secrets are never returned; `totp: true` says that a profile has one.
 
 ```json
 {
   "file": "/home/you/.autologin-mcp/credentials.env",
   "profiles": [
-    { "profile": "staging", "url": "staging.example.com", "username": "qa@example.com" },
+    { "profile": "staging", "url": "staging.example.com", "username": "qa@example.com", "totp": true },
     { "profile": "local", "url": "localhost:3000", "username": "admin", "problems": ["LOCAL_PASSWORD is missing"] }
   ]
 }
@@ -405,8 +430,8 @@ The value it returns is the login result below. The script works once, within 60
 |---|---|---|
 | `success` | Logged in. `url` is the page after login. | Continue the task. |
 | `submitted` | The form was submitted and the page navigated before the outcome was visible (bridge mode). With `reason: username_step_navigated`, only the username of an identifier-first page was sent before the page navigated; that is not counted as a login that went through. | Look at the page to confirm the login. With `username_step_navigated`, call `login` again on the next page. |
-| `failed` | Still on the login form. `hint` carries the page's error message (password removed), `reason` the cause: `still_on_login_form`, or `identifier_rejected` (the username step of an identifier-first page refused the account). | Tell the user the `hint`. Retry at most once. |
-| `needs_human` | The page wants something only a person can do; `reason` says what. `sso`: the tab is on a single sign-on provider, or the login page offers only "Sign in with ..." buttons. `passkey`: the page asks for a passkey or security key. `captcha`: a captcha challenge stands before the login. `mfa_required`: after the password, the page asks for a one-time code. `password_step_timeout`: after the username step of an identifier-first page, no password field appeared. `left_profile_site` (CDP mode): the tab moved to another site before anything was typed. Except for `mfa_required`, no password was sent; none of them counts toward the rate limit. | Tell the user the `hint`. Do not retry. |
+| `failed` | Still on the login form. `hint` carries the page's error message (password removed), `reason` the cause: `still_on_login_form`, `identifier_rejected` (the username step of an identifier-first page refused the account), or `totp_rejected` (the page did not accept the one-time code made from the profile's TOTP secret: check the secret and the computer's clock). | Tell the user the `hint`. Retry at most once. |
+| `needs_human` | The page wants something only a person can do; `reason` says what. `sso`: the tab is on a single sign-on provider, or the login page offers only "Sign in with ..." buttons. `passkey`: the page asks for a passkey or security key. `captcha`: a captcha challenge stands before the login. `mfa_required`: after the password, the page asks for a one-time code and the profile has no TOTP secret. `password_step_timeout`: after the username step of an identifier-first page, no password field appeared. `left_profile_site` (CDP mode): the tab moved to another site before anything was typed. Except for `mfa_required`, no password was sent; none of them counts toward the rate limit. | Tell the user the `hint`. Do not retry. |
 | `no_login_form` | No visible password field was found. If `previous_login` shows a recent `success` or `submitted`, the tab is already logged in. | With `previous_login`: continue. Otherwise ask the user to set selectors for the profile. |
 | `origin_mismatch` | The URL or the page's origin does not belong to any (or the requested) profile. Nothing was filled. | Ask the user to add a profile for this site. |
 | `ambiguous_profile` | Several profiles match. `candidates` lists them. | Call `login` again with `profile`. |
@@ -470,7 +495,7 @@ The server sends these instructions to the MCP client at startup, so even an age
 
 - When a page under test shows a login form, a "session expired" message, a 401/403, or redirects to a login URL, call `login`, then continue the task.
 - If `login` returns `run_in_page`, run `script` unchanged in the tab (or `function` / `expression`, depending on the browser tool); if that call fails or returns nothing, call `login_status`.
-- On `needs_human`, the page wants something only a person can do (single sign-on, a passkey, a captcha or a second factor): tell the user the hint and do not retry.
+- On `needs_human`, the page wants something only a person can do (single sign-on, a passkey, a captcha, or a second factor the profile has no TOTP secret for): tell the user the hint and do not retry.
 - Never ask the user for a password, never type credentials into a page, never read files under `~/.autologin-mcp`, never modify the login script, and do not inspect the login request body or read password field values.
 
 ---
@@ -484,7 +509,7 @@ npx autologin-mcp                    Run the MCP server on stdio (what Claude Co
 npx autologin-mcp install [-y] [--dry-run] [--package <spec>]
 npx autologin-mcp uninstall [-y] [--dry-run] [--purge]
 npx autologin-mcp add [name] [--url <root-url>] [--username <user>] [-y]
-npx autologin-mcp add <name> --url <root-url> --username <user> --password-stdin [-y]
+npx autologin-mcp add <name> --url <root-url> --username <user> --password-stdin [--totp] [-y]
 npx autologin-mcp list
 npx autologin-mcp remove <name> [-y]
 npx autologin-mcp edit
@@ -531,7 +556,10 @@ Adds a profile. If a profile with the same name exists, it asks before replacing
 ```bash
 npx autologin-mcp add                                   # asks for everything
 npx autologin-mcp add staging --url staging.example.com --username qa@example.com
+npx autologin-mcp add staging --totp                   # also asks for a TOTP secret, hidden
 ```
+
+`--totp` adds the account's authenticator secret (base32, or an `otpauth://totp/...` URI), so autologin-mcp can fill the one-time code after the password. It takes no value on the command line, where it would stay in your shell history. See [Configuration](configuration.md#authenticator-codes-totp).
 
 ### Scripts and CI: `--password-stdin`
 
@@ -544,6 +572,7 @@ printf '%s' "$STAGING_PASSWORD" | npx autologin-mcp add staging \
 
 - Pipe the password from a secret store or an environment variable, so it never appears in the command line, your shell history or the process list. There is deliberately no `--password <value>` option.
 - From a keyboard, `--password-stdin` refuses to run; leave it out to type the password hidden.
+- With `--totp`, pipe two lines: the password, then the TOTP secret (`printf '%s\n%s' "$PASSWORD" "$TOTP_SECRET" | ...`).
 - In CI, set `AUTOLOGIN_HOME` to keep the credentials file in a throwaway folder (see [Configuration](configuration.md#environment-variables)).
 - Do not let an AI agent run this with a password typed into the chat: the chat is exactly where the password must not go.
 
@@ -597,7 +626,7 @@ autologin-mcp has one job: an AI agent can log in to the app it is testing, but 
 
 | The agent sees | The agent never sees |
 |---|---|
-| Profile names, root URLs and usernames (`list_profiles`) | Passwords |
+| Profile names, root URLs and usernames (`list_profiles`) | Passwords and TOTP secrets |
 | The login outcome (`success`, `failed` with the page's error message, ...) | The content of the credentials file |
 | The one-time loader script (a `127.0.0.1` URL, no credential) | The credentials response of the bridge |
 | After login: the app itself, including session cookies, as with any logged-in browser | |
@@ -612,7 +641,8 @@ autologin-mcp has one job: an AI agent can log in to the app it is testing, but 
 | A malicious or prompt-injected page asks the agent to "log in here" | A profile only fills pages whose host matches its root URL. In bridge mode the credentials are requested only after the page showed a login form to fill, so a page without one never receives them. In CDP mode the host comes from Chrome itself; in bridge mode from the `Origin` header, which the browser sets and page scripts cannot change. |
 | Another program or page uses the bridge | The bridge listens on `127.0.0.1` only, on a random port. Each script carries a random 192-bit token, works once and expires after 60 seconds. A profile can be released at most 20 times in five minutes. |
 | The agent re-runs a used script | It receives the first run's outcome, not the credentials. |
-| A wrong password locks the account | After three failed logins in five minutes, the profile is paused (`rate_limited`). |
+| A wrong password locks the account | After three failed logins in five minutes, the profile is paused (`rate_limited`). A rejected one-time code counts the same way. |
+| A TOTP secret leaks to the page or the agent | The code is made on your machine; a page only gets the current code, once per login, after the password and under the same origin check. The secret and the code are redacted from every result. |
 | The password stays in the page after a failed attempt | The password field is cleared. |
 | A silent update of a tool that handles credentials | `install` pins the exact package version. |
 
@@ -622,6 +652,7 @@ autologin-mcp prevents **accidental** exposure. It is not a sandbox against a de
 
 - **The hook matches paths and text.** It stops accidental reads, not an agent that deliberately hides the path (for example by encoding it). It also blocks harmless `Bash` commands that merely mention the folder. `Read`/`Write`/`Edit` are only blocked for paths inside it.
 - **The credentials file is plaintext**, protected by file permissions (`600`). Other programs running as your user can read it.
+- **A TOTP secret next to the password** turns two factors into one: whoever reads the file has both. Store TOTP secrets only for test accounts.
 - **JavaScript in the page.** An agent that runs its own JavaScript in the tab could read the password field after it is filled, or modify the bridge script. The instructions tell the agent not to, but they cannot force it.
 - **Session cookies** are visible to an agent that controls the browser once you are logged in.
 - **Network inspection tools** could show the login request body.
@@ -771,8 +802,12 @@ The page wants something only a person can do, and autologin-mcp stopped without
 - `sso`: the tab is on a single sign-on provider (Google, Microsoft, Okta, ...), or the login page offers only "Sign in with ..." buttons. Sign in yourself; autologin-mcp fills only the app's own username and password form. A page that also offers "Continue with email" or a password is not reported: open that form and let the agent call `login` again.
 - `passkey`: the page asks for a passkey or a security key, which needs your device.
 - `captcha`: a captcha stands before the login. Solve it, then let the agent call `login` again if the form appears.
-- `mfa_required`: the password was accepted and the page asks for a one-time code. Filling TOTP codes is planned ([#1](https://github.com/olgaysezgin/autologin-mcp/issues/1)).
+- `mfa_required`: the password was accepted and the page asks for a one-time code. If the code comes from an authenticator app, give the profile its TOTP secret (`npx autologin-mcp add <name> --totp`, see [Configuration](configuration.md#authenticator-codes-totp)) and autologin-mcp fills it. Codes sent by SMS or email stay with you.
 - `password_step_timeout`, `left_profile_site`: see the identifier-first section above.
+
+### `failed` with `reason: totp_rejected`
+
+The page did not accept the one-time code made from the profile's TOTP secret. Check that the secret belongs to this account (re-add it from the authenticator setup, or its `otpauth://` URI), and that the computer's clock is set automatically: a clock that is off by more than about 30 seconds makes every code wrong. Like a wrong password, it counts toward the rate limit.
 
 Pages are classified only after the usual detect time (5 seconds), so a login form that renders late is still filled. In bridge mode the credentials are not even requested for these pages.
 
@@ -855,7 +890,7 @@ A profile only fills pages whose host matches its root URL. In bridge mode, the 
 
 ## Does it support SSO, OAuth, two-factor authentication or multi-step logins?
 
-It fills the common username + password form on the app's own page, including React, Vue and Angular forms and identifier-first logins (email, then the password field on the same page). Single sign-on, passkeys, captchas and a one-time code after the password are recognised and handed to you (`needs_human`) instead of failing or retrying. Filling TOTP codes, logins that navigate to a second document, and iframes are on the [roadmap](https://github.com/olgaysezgin/autologin-mcp#roadmap).
+It fills the common username + password form on the app's own page, including React, Vue and Angular forms and identifier-first logins (email, then the password field on the same page). With a TOTP secret in the profile, it also fills the one-time code an authenticator app would show after the password. Single sign-on, passkeys, captchas, and a one-time code the profile has no TOTP secret for are recognised and handed to you (`needs_human`) instead of failing or retrying. Logins that navigate to a second document, and iframes, are on the [roadmap](https://github.com/olgaysezgin/autologin-mcp#roadmap). See [Configuration](configuration.md#authenticator-codes-totp) for TOTP.
 
 ## Can I use several accounts for the same app?
 

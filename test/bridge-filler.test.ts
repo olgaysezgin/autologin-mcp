@@ -419,3 +419,71 @@ describe('bridgeLogin: fields re-rendered while the credentials arrive (#2 revie
     expect(received).toEqual({ username: CREDS.username, password: CREDS.password });
   });
 });
+
+describe('TOTP codes after the password (#1)', () => {
+  /** The password form gives way to a code step; `onVerify` gets what was typed into the code field. */
+  function codeApp(onVerify: (code: string) => void) {
+    app(() => {
+      document.querySelector('#login')!.innerHTML = `<input id="otp" autocomplete="one-time-code"><button id="verify">Verify</button><p id="err" class="error"></p>`;
+      document.querySelector('#verify')!.addEventListener('click', () => onVerify(document.querySelector<HTMLInputElement>('#otp')!.value));
+    });
+  }
+
+  it('asks for the code only at the code step, fills it, submits it and succeeds', async () => {
+    const code = vi.fn(async () => '123456');
+    let typed = '';
+    codeApp((value) => {
+      typed = value;
+      document.querySelector('#login')!.remove();
+    });
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code }, TIMING)).toEqual({ status: 'success', url: location.href });
+    expect(typed).toBe('123456');
+    expect(code).toHaveBeenCalledOnce();
+  });
+
+  it('reports a rejected code as failed, with the code scrubbed from the page message', async () => {
+    codeApp(() => setTimeout(() => showError('Code 123456 is not valid'), 5));
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code: async () => '123456' }, TIMING)).toEqual({
+      status: 'failed',
+      url: location.href,
+      reason: 'totp_rejected',
+      hint: 'Code [REDACTED] is not valid',
+    });
+  });
+
+  it('fails with a hint about the secret and the clock when the code step stays', async () => {
+    codeApp(() => undefined);
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code: async () => '123456' }, TIMING)).toMatchObject({
+      status: 'failed',
+      reason: 'totp_rejected',
+      hint: expect.stringContaining('clock'),
+    });
+  });
+
+  it('presses Enter in a code field without a button', async () => {
+    app(() => {
+      const login = document.querySelector('#login')!;
+      login.innerHTML = '<input id="otp" name="otp">';
+      document.querySelector('#otp')!.addEventListener('keydown', (e) => {
+        if ((e as KeyboardEvent).key === 'Enter') login.remove();
+      });
+    });
+    expect((await bridgeLogin(autologinInpage, { ...CREDS, code: async () => '123456' }, TIMING)).status).toBe('success');
+  });
+
+  it('types nothing when the code is refused or the code step went away meanwhile', async () => {
+    codeApp(() => undefined);
+    const refused = async (): Promise<string> => {
+      throw new Error('This login already got its one-time code.');
+    };
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code: refused }, TIMING)).toEqual({ status: 'error', url: location.href, hint: 'This login already got its one-time code.' });
+    expect(document.querySelector<HTMLInputElement>('#otp')!.value).toBe('');
+
+    codeApp(() => undefined);
+    const gone = async () => {
+      document.querySelector('#login')!.innerHTML = '<p>Choose another way to sign in</p><input name="otp" style="display:none">';
+      return '123456';
+    };
+    expect(await bridgeLogin(autologinInpage, { ...CREDS, code: gone }, TIMING)).toMatchObject({ status: 'needs_human', reason: 'mfa_required' });
+  });
+});

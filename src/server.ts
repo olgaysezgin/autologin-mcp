@@ -11,6 +11,7 @@ import type { LoadedStore } from './store/envfile.js';
 import { hostOf, matchesUrl } from './store/match.js';
 import { isUsable, type UsableProfile } from './store/profiles.js';
 import { ssoProvider } from './sso.js';
+import { secretForms } from './totp.js';
 
 export const ADD_HINT =
   'Ask the user to run "npx autologin-mcp add" in a separate terminal (never in this chat), or call open_config so they can edit the credentials file.';
@@ -26,7 +27,7 @@ export const INSTRUCTIONS = [
   "autologin-mcp signs the browser tab you are testing into its app with credentials that stay on the user's machine; you never see them.",
   '- When a page under test shows a login form, a "session expired" message, a 401/403, or redirects to a login URL, call `login`, then continue the task. Pass `url` (the tab URL) and, when several accounts exist for the app, `profile`.',
   `- If \`login\` returns \`run_in_page\`: ${RUN_IN_PAGE_HINT} On \`submitted\`, check the page to confirm you are logged in.`,
-  '- On `needs_human`, the page wants something only a person can do (single sign-on, a passkey, a captcha or a second factor): tell the user the hint and do not retry.',
+  '- On `needs_human`, the page wants something only a person can do (single sign-on, a passkey, a captcha, or a second factor the profile has no TOTP secret for): tell the user the hint and do not retry.',
   '- `list_profiles` shows which apps (root URLs) and usernames are configured; `login_status` shows the latest login outcome per profile.',
   '- Never ask the user for a password, never type credentials into a page yourself, never read files under ~/.autologin-mcp, never modify the login script, and do not inspect the login request body in network logs or read password field values.',
   `- If no profile matches: ${ADD_HINT}`,
@@ -55,6 +56,10 @@ export interface LoginArgs {
 }
 
 const message = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/** A redactor for every secret of every profile: passwords and TOTP secrets (#1). */
+const redactorFor = (store: LoadedStore | null) =>
+  createRedactor((store?.profiles ?? []).flatMap((p) => [p.password, ...(p.totpSecret === undefined ? [] : secretForms(p.totpSecret))]));
 
 function reply(value: unknown, isError = false) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }], isError };
@@ -169,7 +174,7 @@ export function createServer(deps: ServerDeps): McpServer {
     },
     async () => {
       const store = await deps.loadStore();
-      const redact = createRedactor(store.profiles.map((p) => p.password));
+      const redact = redactorFor(store);
       return reply(
         redact({
           file: store.file,
@@ -177,6 +182,7 @@ export function createServer(deps: ServerDeps): McpServer {
             profile: p.name,
             url: p.url,
             username: p.username ?? null,
+            ...(p.totp !== undefined ? { totp: true } : {}),
             ...(p.problems.length > 0 ? { problems: p.problems } : {}),
           })),
           ...(store.profiles.length === 0 ? { hint: ADD_HINT } : {}),
@@ -204,10 +210,9 @@ export function createServer(deps: ServerDeps): McpServer {
       try {
         store = await deps.loadStore();
         const result = await runLogin(deps, store, args);
-        return reply(createRedactor(store.profiles.map((p) => p.password))(result), result.status === 'error');
+        return reply(redactorFor(store)(result), result.status === 'error');
       } catch (error) {
-        const redact = createRedactor(store?.profiles.map((p) => p.password) ?? []);
-        return reply(redact({ status: 'error', hint: message(error) }), true);
+        return reply(redactorFor(store)({ status: 'error', hint: message(error) }), true);
       }
     },
   );
@@ -225,7 +230,7 @@ export function createServer(deps: ServerDeps): McpServer {
       const store = await deps.loadStore();
       const results = deps.results.get(args.profile);
       const body = results.length > 0 ? { results } : { results, hint: 'No login result has been reported yet. Run the `run_in_page` script, or call login again.' };
-      return reply(createRedactor(store.profiles.map((p) => p.password))(body));
+      return reply(redactorFor(store)(body));
     },
   );
 
