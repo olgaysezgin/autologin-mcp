@@ -41,6 +41,12 @@ export interface BridgeResult {
   hint?: string;
 }
 
+/**
+ * sessionStorage key the password step's run sets when the page navigates (#1 review): a page that asks only for a
+ * one-time code is filled only when it is the document loaded right after that navigation, in the same tab.
+ */
+export const PASSWORD_STEP_KEY = 'autologin-mcp:password-step';
+
 /*
  * Bridge-mode login engine. Serialized and executed inside the page, so it must stay
  * self-contained: it only uses its arguments (`inpage` is autologinInpage) and browser globals.
@@ -107,11 +113,22 @@ export async function bridgeLogin(
     return null;
   };
   let leaving = false;
+  let passwordSent = false;
   let wake = (): void => undefined;
+  const STEP_KEY = 'autologin-mcp:password-step'; // PASSWORD_STEP_KEY
   const onLeave = (): void => {
     leaving = true;
+    if (passwordSent && sentCode === null) {
+      try {
+        sessionStorage.setItem(STEP_KEY, String(Date.now()));
+      } catch {
+        // storage blocked: the code page is then left to a person
+      }
+    }
     wake();
   };
+  const CODE_PAGE_ALONE =
+    'This page asks for a one-time code, but it is not the page the last password step of this profile led to, so autologin-mcp leaves it alone.';
 
   try {
     const startedAt = Date.now();
@@ -138,8 +155,26 @@ export async function bridgeLogin(
       detected = inpage('detect', { selectors: creds.selectors }) as DetectResult;
     }
     const codePage = detected.step === 'code' && codeStep !== null;
-    if (codePage && codeStep === 'after_code') return finish('failed', { reason: 'totp_rejected', hint: CODE_AGAIN_HINT });
-    if (codePage && creds.code === undefined) return mfaRequired();
+    if (codePage && codeStep === 'after_code') {
+      // A code went in and the page navigated: with an error message it asks again, which means the code was
+      // rejected. Without one it may be a next step (an email check, a settings page): left alone.
+      const current = inpage('state', { successSelector: creds.successSelector }) as StateResult;
+      return current.errorText !== null ? finish('failed', { reason: 'totp_rejected', hint: CODE_AGAIN_HINT }) : finish('no_login_form', { hint: CODE_PAGE_ALONE });
+    }
+    if (codePage) {
+      // The document has to be the one loaded right after this tab's password step navigated (its run left a mark),
+      // so a code field the agent finds on a page it opened later (turning two-factor off) never gets a code.
+      let marked = Number.NaN;
+      try {
+        marked = Number(sessionStorage.getItem(STEP_KEY));
+        sessionStorage.removeItem(STEP_KEY);
+      } catch {
+        // storage blocked: not marked
+      }
+      const followed = marked > 0 && Date.now() - marked < 120_000 && Math.abs(performance.timeOrigin - marked) < 15_000;
+      if (!followed) return finish('no_login_form', { hint: CODE_PAGE_ALONE });
+      if (creds.code === undefined) return mfaRequired();
+    }
     if (!detected.found && !codePage) {
       if (detected.step !== 'identifier' || !detected.hasUsername) {
         if (detected.blocker) return finish('needs_human', { reason: detected.blocker, hint: NEEDS_HUMAN_HINTS[detected.blocker] });
@@ -205,6 +240,7 @@ export async function bridgeLogin(
       fill('password', password);
 
       window.addEventListener('beforeunload', onLeave, { once: true });
+      passwordSent = true;
       if ((inpage('submit', {}) as SubmitResult) === 'none') pressEnter('password');
     }
 

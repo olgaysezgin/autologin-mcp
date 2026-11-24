@@ -65,7 +65,7 @@ Single sign-on, passkey and captcha pages are classified only after the usual de
 
 ## `failed` with `reason: totp_rejected`
 
-The page did not accept the one-time code made from the profile's TOTP secret. Check that the secret belongs to this account (re-add it from the authenticator setup, or its `otpauth://` URI), and that the computer's clock is set automatically: a clock that is off by more than about 30 seconds makes every code wrong. Like a wrong password, it counts toward the rate limit. One code is sent per password step: in bridge mode, when the app shows its code page again after `submitted` with `reason: code_submitted`, the next `login` call reports `totp_rejected` and sends no new code.
+The page did not accept the one-time code made from the profile's TOTP secret. Check that the secret belongs to this account (re-add it from the authenticator setup, or its `otpauth://` URI), and that the computer's clock is set automatically: a clock that is off by more than about 30 seconds makes every code wrong. Like a wrong password, it counts toward the rate limit. One code is sent per password step, and at most three per profile in five minutes until a login goes through (after that the code request returns `rate_limited`). In bridge mode, when the app shows its code page again with an error message after `submitted` with `reason: code_submitted`, the next `login` call reports `totp_rejected` and sends no new code.
 
 ## `failed` although the credentials are right
 

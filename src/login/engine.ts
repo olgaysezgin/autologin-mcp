@@ -1,6 +1,6 @@
 import { FIELD_ATTR, type CodeResult, type DetectResult, type FieldRole, type InpageAction, type InpageArg, type StateResult, type SubmitResult } from '../inpage.js';
 import { REDACTED } from '../redact.js';
-import type { CodeStep, PreviousLogin } from '../results.js';
+import type { PreviousLogin } from '../results.js';
 import { hostOf, matchesUrl } from '../store/match.js';
 import type { UsableProfile } from '../store/profiles.js';
 import { freshTotpCode } from '../totp.js';
@@ -82,10 +82,6 @@ export const NEEDS_HUMAN_HINTS = {
 export const TOTP_REJECTED_HINT =
   "The page did not accept the one-time code made from the profile's TOTP secret. Check the secret, and that this computer's clock is right.";
 
-/** A code page that comes back after a submitted code (bridge mode navigated after it); bridge mode carries the same words. */
-export const CODE_AGAIN_HINT =
-  "The page asks for the one-time code again after the last code was submitted, so that code was not accepted. Check the profile's TOTP secret, and that this computer's clock is right. No new code was sent.";
-
 export const PASSWORD_STEP_HINT =
   'The page did not ask for a password after the username step. It may use single sign-on, a passkey or a second factor, so a human has to finish this login.';
 
@@ -148,13 +144,11 @@ export async function performLogin(
   profile: UsableProfile,
   timing: LoginTiming = DEFAULT_TIMING,
   clock: Clock = realClock,
-  /** Whether a page that asks only for a one-time code is a step of this profile's login (see ResultLog.codeStep). */
-  codeStep: CodeStep = null,
 ): Promise<LoginResult> {
   // The one-time code sent for this login, if any: like the password, it never appears in a result,
   // also not in the URL (a GET form puts it there). Every result of loginSteps carries the URL.
   const sent = { code: null as string | null };
-  const result = await loginSteps(page, profile, timing, clock, codeStep, (code) => (sent.code = code));
+  const result = await loginSteps(page, profile, timing, clock, (code) => (sent.code = code));
   if (sent.code === null) return result;
   const code = sent.code;
   const hide = (text: string): string => text.split(code).join(REDACTED);
@@ -166,7 +160,6 @@ async function loginSteps(
   profile: UsableProfile,
   timing: LoginTiming,
   clock: Clock,
-  codeStep: CodeStep,
   codeSent: (code: string) => void,
 ): Promise<LoginResult> {
   const base = { profile: profile.name };
@@ -222,10 +215,10 @@ async function loginSteps(
     let detected = await detect();
     // Wait for a password field. An identifier step (username + Next) counts only once it has stayed for
     // the settle time; with a Log in / Sign in button, only after the whole detect time, since a one-page
-    // form may still be rendering its password field. A code page during a login (the app navigated after the
-    // password) needs no waiting; outside a login it is not a login page at all, as before TOTP support.
+    // form may still be rendering its password field. A page that asks only for a one-time code is not a login
+    // page here: CDP mode fills a code step only in the run that typed the password, following the tab to it.
     for (;;) {
-      if (detected?.found || detected?.error || (detected?.step === 'code' && codeStep !== null)) break;
+      if (detected?.found || detected?.error) break;
       const now = clock.now();
       if (detected?.step === 'identifier') {
         identifierSince ??= now;
@@ -237,10 +230,7 @@ async function loginSteps(
       await clock.sleep(timing.pollMs);
       detected = await detect();
     }
-    const codePage = detected?.step === 'code' && codeStep !== null;
-    if (codePage && codeStep === 'after_code') return { status: 'failed', ...base, url: page.url(), reason: 'totp_rejected', hint: CODE_AGAIN_HINT };
-    if (codePage && profile.totp === undefined) return mfaRequired();
-    if (!detected?.found && !codePage) {
+    if (!detected?.found) {
       if (detected?.step !== 'identifier' || !detected.hasUsername) {
         if (detected?.blocker) return { status: 'needs_human', ...base, url: page.url(), reason: detected.blocker, hint: NEEDS_HUMAN_HINTS[detected.blocker] };
         return { status: 'no_login_form', ...base, url: page.url(), hint: detected?.error ?? 'No visible password field was found on the page.' };
@@ -275,15 +265,9 @@ async function loginSteps(
     onSite();
     const before = await state();
     await page.bringToFront().catch(() => undefined);
-    if (codePage) {
-      // Only the code is asked for here: the password went in on the page before.
-      const stopped = await sendCode(profile.totp!);
-      if (stopped !== null) return stopped;
-    } else {
-      if (detected!.hasUsername) await typeInto(page, 'username', profile.username, onSite);
-      await typeInto(page, 'password', profile.password, onSite);
-      await submitForm(page, detected!.hasSubmit);
-    }
+    if (detected.hasUsername) await typeInto(page, 'username', profile.username, onSite);
+    await typeInto(page, 'password', profile.password, onSite);
+    await submitForm(page, detected.hasSubmit);
 
     // Each step (the password, then a one-time code) gets its own wait and its own "message before".
     let stepStart = clock.now();

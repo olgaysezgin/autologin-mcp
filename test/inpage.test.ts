@@ -467,6 +467,35 @@ describe('code pages of their own: second review (#1 review 2)', () => {
   });
 });
 
+describe('code fields that are not a login step (#1 review 3)', () => {
+  const code = () => autologinInpage('code', {});
+
+  it('never takes a form that turns something off or removes it, in the code action or as a code page', () => {
+    for (const markup of [
+      `<form><input name="otp_code" autocomplete="one-time-code"><button type="submit">Disable two-factor authentication</button></form>`,
+      `<form><input name="otp"><button type="submit">Verify</button><button type="button">Turn off</button></form>`,
+      `<div><input name="otp"><button>Remove device</button><button>Confirm</button></div>`,
+      `<form><input name="otp"><input type="submit" value="İki adımlı doğrulamayı kapat"></form>`,
+    ]) {
+      document.body.innerHTML = markup;
+      expect(code()).toEqual({ found: false, hasSubmit: false });
+      expect(detect()).not.toHaveProperty('step', 'code');
+    }
+  });
+
+  it('takes a code field only when it is the one field to type in its form or container', () => {
+    document.body.innerHTML = `<form><input name="display_name" value="QA"><input name="otp"><button type="submit">Verify</button></form>`;
+    expect(code()).toEqual({ found: false, hasSubmit: false });
+    document.body.innerHTML = `<form><input type="password" style="display:none"><input name="otp"><button type="submit">Verify</button></form>`;
+    expect(code()).toEqual({ found: true, hasSubmit: true });
+    // The login's own username field, or a read-only one showing the account, does not count.
+    document.body.innerHTML = `<form><input type="email" ${FIELD_ATTR}="username"><input name="otp"><button type="submit">Verify</button></form>`;
+    expect(code()).toEqual({ found: true, hasSubmit: true });
+    document.body.innerHTML = `<form><input type="email" readonly value="qa@example.com"><input name="otp"><button type="submit">Verify</button></form>`;
+    expect(code()).toEqual({ found: true, hasSubmit: true });
+  });
+});
+
 describe('pages a person has to finish: no false alarms (#2 review)', () => {
   it('does not take a passkey settings link on a logged-in page for a passkey login', () => {
     for (const markup of ['<nav><a href="/settings">Security: add a passkey</a></nav><p>Dashboard</p>', '<p>Welcome</p><button>Create a passkey</button>']) {

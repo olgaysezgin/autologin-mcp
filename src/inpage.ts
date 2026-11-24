@@ -115,6 +115,42 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
     usable(el) &&
     el.type !== 'password' &&
     ((el.getAttribute('autocomplete') ?? '').toLowerCase().split(/\s+/).includes('one-time-code') || [el.name, el.id].some((word) => CODE_FIELD.test(word)));
+  // Controls a person types into or picks from. Hidden fields, checkboxes and buttons do not count.
+  const NOT_TYPED = ['hidden', 'checkbox', 'radio', 'submit', 'button', 'image', 'reset'];
+  const typedControls = (controls: Element[]): number =>
+    controls.filter(
+      (el) =>
+        (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) &&
+        visible(el) &&
+        !el.disabled &&
+        !(el instanceof HTMLInputElement && NOT_TYPED.includes(el.type)),
+    ).length;
+  const CODE_BUTTONS = 'button, [role="button"], input[type="button"], input[type="submit"], input[type="image"]';
+  // A code field on a page that turns something off or removes it ("Disable two-factor authentication") is a
+  // logged-in settings form, not a login step: it never gets a code (#1 review).
+  const OFF_TEXT = /\b(disable|deactivate|turn off|switch off|remove|delete|revoke|reset|unlink)\b|kapat|devre d[ıi][sş][ıi]|kald[ıi]r|\bsil\b|deaktivieren|ausschalten|d[ée]sactiver|supprimer|desactivar|eliminar/i;
+  /**
+   * The step a one-time-code field belongs to: the code is the one field to type in its form, or in its small
+   * container, and nothing there turns something off. Returns that form or container, or null.
+   */
+  const codeStepOf = (field: HTMLInputElement): Element | null => {
+    // The login's own fields (tagged by detect, still there on a one-form page) and read-only ones do not count.
+    const others = (controls: Element[]): number =>
+      typedControls(controls.filter((el) => !['username', 'password'].includes(el.getAttribute(ATTR) ?? '') && !(el as HTMLInputElement).readOnly));
+    const scopes: Element[] = [];
+    if (field.form !== null) {
+      if (others(Array.from(field.form.elements)) !== 1) return null;
+      scopes.push(field.form);
+    } else {
+      let node = field.parentElement;
+      for (let depth = 0; depth < 2 && node !== null && node !== document.documentElement; depth += 1, node = node.parentElement) {
+        if (others(Array.from(node.querySelectorAll('input, textarea, select'))) !== 1) return null;
+        scopes.push(node);
+      }
+    }
+    const scope = scopes.at(-1)!;
+    return Array.from(scope.querySelectorAll(CODE_BUTTONS)).some((el) => visible(el) && OFF_TEXT.test(label(el))) ? null : scope;
+  };
 
   if (action === 'state') {
     const findError = (): string | null => {
@@ -175,7 +211,7 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
     // step still clears the password field, also when the page only hid it.
     document.querySelectorAll(`[${ATTR}="code"], [${ATTR}="submit"]`).forEach((el) => el.removeAttribute(ATTR));
     const field = Array.from(document.querySelectorAll('input')).find(codeField);
-    if (field === undefined) return { found: false, hasSubmit: false };
+    if (field === undefined || codeStepOf(field) === null) return { found: false, hasSubmit: false };
     field.setAttribute(ATTR, 'code');
     // The form's own submit button, or a Verify / Continue button after the field in its container:
     // never "Resend code" or "Cancel", and never a button before the field.
@@ -208,28 +244,11 @@ export function autologinInpage(action: InpageAction, arg: InpageArg): DetectRes
     hasSubmit: false,
     error: `The ${field} selector did not match a visible field.`,
   });
-  // Controls a person types into or picks from. Hidden fields, checkboxes and buttons do not count.
-  const NOT_TYPED = ['hidden', 'checkbox', 'radio', 'submit', 'button', 'image', 'reset'];
-  const typedControls = (controls: Element[]): number =>
-    controls.filter(
-      (el) =>
-        (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) &&
-        visible(el) &&
-        !el.disabled &&
-        !(el instanceof HTMLInputElement && NOT_TYPED.includes(el.type)),
-    ).length;
-  // A page that asks only for a one-time code: the code is the one field to type in its form, or in its small
-  // container. An email + code form (a passwordless login) is not one. Whether it is a step of a login at all is
-  // for the caller to know (#1).
+  // A page that asks only for a one-time code (codeStepOf). An email + code form (a passwordless login) is not one.
+  // Whether it is a step of a login at all is for the caller to know (#1).
   const codePage = (): boolean => {
     const field = Array.from(document.querySelectorAll('input')).find(codeField);
-    if (field === undefined) return false;
-    if (field.form !== null) return typedControls(Array.from(field.form.elements)) === 1;
-    let node = field.parentElement;
-    for (let depth = 0; depth < 2 && node !== null && node !== document.documentElement; depth += 1, node = node.parentElement) {
-      if (typedControls(Array.from(node.querySelectorAll('input, textarea, select'))) !== 1) return false;
-    }
-    return true;
+    return field !== undefined && codeStepOf(field) !== null;
   };
 
   let password: HTMLInputElement;

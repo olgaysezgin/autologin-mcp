@@ -105,3 +105,12 @@ describe('ResultLog code steps (#1 review)', () => {
     }
   });
 });
+
+describe('ResultLog code steps: through no_login_form (#1 review 3)', () => {
+  it('keeps the context when a no_login_form came in between', () => {
+    const log = new ResultLog(() => Date.UTC(2026, 10, 24, 12, 0, 0));
+    log.record('app', { status: 'submitted' }, 'bridge');
+    log.record('app', { status: 'no_login_form' }, 'bridge');
+    expect(log.codeStep('app')).toBe('after_password');
+  });
+});

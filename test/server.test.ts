@@ -296,17 +296,6 @@ describe('MCP server: TOTP profiles (#1)', () => {
     expect((await call(c, 'login')).body).toEqual({ status: 'error', hint: 'boom [REDACTED]' });
   });
 
-  it('tells the CDP engine whether a code page is a step of a login in progress (#1 review 2)', async () => {
-    const results = new ResultLog();
-    const login = vi.fn(async () => ({ status: 'success' as const }));
-    const c = await connect(makeDeps({ results, login, loadStore: async () => store(vars) }));
-    await call(c, 'login');
-    expect(login).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ name: 'app' }), null);
-    results.record('app', { status: 'submitted' }, 'bridge');
-    await call(c, 'login');
-    expect(login).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), 'after_password');
-  });
-
   it('counts a rejected code toward the rate limit, like a wrong password', async () => {
     const c = await connect(makeDeps({ loadStore: async () => store(vars), login: async () => ({ status: 'failed', reason: 'totp_rejected' }) }));
     for (let i = 0; i < 3; i += 1) expect((await call(c, 'login')).body).toMatchObject({ status: 'failed', reason: 'totp_rejected' });

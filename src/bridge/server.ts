@@ -35,6 +35,10 @@ export interface BridgeOptions {
   reuseWaitMs?: number;
   /** Whether a page that asks only for a one-time code is a step of a login in progress (ResultLog.codeStep). */
   codeStepContext?: (profile: string) => CodeStep;
+  /** Called when a page that asks only for the code got one: that password step is used up (serve.ts records it). */
+  onCodeOnly?: (profile: string) => void;
+  /** One-time codes per profile per 5 minutes until a login goes through (a guard against a wrong secret in a loop). */
+  maxCodes?: number;
   /** Waits before handing out a one-time code that is about to expire (tests replace it). */
   sleep?: (ms: number) => Promise<void>;
 }
@@ -84,6 +88,7 @@ export class BridgeServer {
   private listening: Promise<{ server: http.Server; base: string }> | null = null;
   private readonly tickets = new Map<string, Ticket>();
   private readonly releases: FailureLimiter;
+  private readonly codes: FailureLimiter;
   private readonly ttlMs: number;
   private readonly timing: BridgeTiming;
   private readonly now: () => number;
@@ -97,6 +102,7 @@ export class BridgeServer {
     this.reuseWaitMs = options.reuseWaitMs ?? 25_000;
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.releases = new FailureLimiter(options.maxReleases ?? 20, 5 * 60_000, this.now);
+    this.codes = new FailureLimiter(options.maxCodes ?? 3, 5 * 60_000, this.now);
   }
 
   /** The first run's result, waiting for it (up to reuseWaitMs) when it is still in progress. */
@@ -214,12 +220,22 @@ export class BridgeServer {
         return send(403, { status: 'refused', hint: 'Only the login script of this ticket can ask for its one-time code.' });
       }
       if (ticket.result !== null) return send(410, { status: 'finished', hint: 'This login already reported its outcome; call login again.' });
-      // A page that asks only for the code gets one only right after this profile's password step (#1 review).
-      if (body?.codeOnly === true && ticket.codeStep !== 'after_password') {
+      // A page that asks only for the code gets one only right after this profile's password step, judged now: an
+      // earlier script may have used that step up meanwhile (#1 review).
+      const codeOnly = body?.codeOnly === true;
+      if (codeOnly && (this.options.codeStepContext?.(profile.name) ?? null) !== 'after_password') {
         return send(409, { status: 'refused', hint: 'There is no login of this profile in progress that waits for a code on a page of its own.' });
       }
       if (ticket.codeReleased) return send(409, { status: 'already_used', hint: 'This login already got its one-time code.' });
+      if (this.codes.isBlocked(profile.name)) {
+        return send(429, {
+          status: 'rate_limited',
+          hint: 'Three one-time codes went out for this profile in the last 5 minutes without a login that went through. Check the profile\'s TOTP secret and this computer\'s clock before trying again.',
+        });
+      }
       ticket.codeReleased = true;
+      this.codes.recordFailure(profile.name);
+      if (codeOnly) this.options.onCodeOnly?.(profile.name);
       return send(200, { code: await freshTotpCode(profile.totp, { now: this.now, sleep: this.sleep }) });
     }
 
@@ -251,6 +267,7 @@ export class BridgeServer {
     }
     if (ticket.result === null && typeof (result as BridgeResult | null)?.status === 'string') {
       ticket.result = result as BridgeResult;
+      if (ticket.result.status === 'success') this.codes.reset(profile.name);
       for (const wake of ticket.waiters.splice(0)) wake(ticket.result);
       this.options.onResult?.(profile.name, ticket.result);
     }

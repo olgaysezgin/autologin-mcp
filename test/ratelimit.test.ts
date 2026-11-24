@@ -20,3 +20,17 @@ describe('FailureLimiter', () => {
     expect(limiter.isBlocked('x')).toBe(true);
   });
 });
+
+describe('FailureLimiter.reset (#1 review 3)', () => {
+  it('forgets a key', () => {
+    const limiter = new FailureLimiter(2, 1_000, () => 0);
+    limiter.recordFailure('a');
+    limiter.recordFailure('a');
+    limiter.recordFailure('b');
+    limiter.recordFailure('b');
+    expect(limiter.isBlocked('a')).toBe(true);
+    limiter.reset('a');
+    expect(limiter.isBlocked('a')).toBe(false);
+    expect(limiter.isBlocked('b')).toBe(true);
+  });
+});

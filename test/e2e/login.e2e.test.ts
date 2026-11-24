@@ -12,7 +12,7 @@ import { selectTarget } from '../../src/browser/tabs.ts';
 import { performLogin, type LoginResult, type LoginTiming } from '../../src/login/engine.ts';
 import { createDefaultDeps } from '../../src/serve.ts';
 import { createServer } from '../../src/server.ts';
-import { ResultLog } from '../../src/results.ts';
+import { CODE_SUBMITTED, ResultLog } from '../../src/results.ts';
 import { buildStore, isUsable, type UsableProfile } from '../../src/store/profiles.ts';
 import { launchChrome, type TestChrome } from '../helpers/chrome.ts';
 import { startFixtureServer, VALID, type FixtureServer } from '../helpers/fixture-server.ts';
@@ -306,7 +306,12 @@ describe('bridge mode in a real Chrome (autologin-mcp has no CDP access)', () =>
     let wired: BridgeServer;
     beforeAll(() => {
       log = new ResultLog();
-      wired = new BridgeServer({ timing: FAST, onResult: (name, result) => log.record(name, result, 'bridge'), codeStepContext: (name) => log.codeStep(name) });
+      wired = new BridgeServer({
+        timing: FAST,
+        onResult: (name, result) => log.record(name, result, 'bridge'),
+        codeStepContext: (name) => log.codeStep(name),
+        onCodeOnly: (name) => log.record(name, { status: 'submitted', reason: CODE_SUBMITTED }, 'bridge'),
+      });
     });
     afterAll(async () => {
       await wired.close();

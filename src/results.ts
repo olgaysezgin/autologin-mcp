@@ -92,10 +92,11 @@ export class ResultLog {
   }
 
   codeStep(profile: string): CodeStep {
-    const latest = this.latest.get(profile);
-    if (latest?.status !== 'submitted' || this.now() - Date.parse(latest.at) > CODE_STEP_MS) return null;
-    if (latest.reason === CODE_SUBMITTED) return 'after_code';
-    return latest.reason === undefined ? 'after_password' : null;
+    // Through an earlier no_login_form (say, a code page that rendered slowly) to the real login outcome.
+    const previous = this.recent(profile);
+    if (previous?.status !== 'submitted' || this.now() - Date.parse(previous.at) > CODE_STEP_MS) return null;
+    if (previous.reason === CODE_SUBMITTED) return 'after_code';
+    return previous.reason === undefined ? 'after_password' : null;
   }
 
   record(profile: string, result: { status: string; reason?: string; hint?: string; url?: string }, via: LoggedResult['via']): LoggedResult {
